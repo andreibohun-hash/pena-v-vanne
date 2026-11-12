@@ -1,0 +1,1498 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Пена в ванне</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#bfe4f2">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+/* Палитра — одно место; canvas читает цвета через getComputedStyle (PROTO-BASE §9). */
+:root{
+  --bg:#9fcfe2; --frame:#d8f0f8; --ink:#1f3a4d; --muted:#557386;
+  --accent:#ff9f43; --btn:#ffffff; --danger:#e8505b;
+  --wall:#2f6a74; --grout:#2a616b; --tub:#ffffff; --tub-shade:#e3eef3; --water:#7cc6e6; --water-hi:#a9dcf0;
+  --foam:#ffffff; --bubble:rgba(255,255,255,.38); --bubble-hard:rgba(150,196,226,.55); --rim:#ffffff; --rim-hard:#4f8fbf;
+  --cup:#8fd6c8; --cup-rim:#5bb3a3; --slot:rgba(255,255,255,.55);
+  --outline:#23384a; --beak:#ff8a2a; --belly:#d7ecff; --white:#ffffff;
+  --toy0:#ffd23f; --toy1:#4a90e2; --toy2:#ff7f50; --toy3:#5cc96b; --toy4:#e84a5f; --toy5:#9b6dde;
+  --hud-bg:#2a5f6b; --foot-bg:#dce9e6;
+  --frame-w:430px;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#20384a; --frame:#bfe0ee; --wall:#bfe0ee; --grout:#a9d2e3; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:16px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow:hidden;overscroll-behavior:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+#frame{position:relative;width:min(100vw,var(--frame-w));height:100dvh;height:100svh;margin:0 auto;background:var(--hud-bg);
+  display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+/* HUD и кнопки (аудит v0.2): значок уровня, плашка счётчика, круглые кнопки с иконками. CSS — только на UI-слое (§9). */
+header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 14px 6px;pointer-events:none;background:var(--hud-bg);color:#fff}
+.badge{min-width:58px;height:58px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff1a0,#ffc93c 55%,#f0a21a);
+  box-shadow:0 3px 0 #c97d0f,0 6px 10px rgba(0,0,0,.25);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#5a3300;line-height:1}
+.badge small{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px} .badge b{font-size:22px;font-weight:900}
+.pill{flex:1;text-align:right} .pill{flex:0 0 auto;margin-left:auto;background:rgba(0,30,40,.35);padding:6px 12px;border-radius:999px;font-weight:700;font-size:15px}
+button.round{pointer-events:auto;width:44px;height:44px;border-radius:50%;padding:0;background:rgba(0,30,40,.35);display:flex;align-items:center;justify-content:center}
+#tip{position:absolute;left:50%;top:10px;transform:translateX(-50%);width:max-content;max-width:84%;padding:9px 16px;border-radius:16px;background:rgba(255,255,255,.93);
+  color:#244653;font-weight:700;font-size:16px;text-align:center;pointer-events:none;box-shadow:0 4px 12px rgba(0,30,40,.25)}
+#tip:empty{display:none}
+#game{flex:1;position:relative;touch-action:none}
+#game canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#gl{pointer-events:none}
+footer{display:flex;gap:14px;justify-content:center;align-items:center;padding:8px 14px calc(12px + env(safe-area-inset-bottom));background:var(--foot-bg)}
+.fbtn{height:56px;min-width:56px;border-radius:28px;padding:0 16px;display:flex;align-items:center;justify-content:center;gap:8px;color:#fff;font-weight:800;font-size:16px;
+  transition:transform .06s} .fbtn:active{transform:translateY(2px) scale(.96)}
+.fbtn.blue{background:linear-gradient(#5aa8ff,#2f7ef0);box-shadow:0 4px 0 #1f5cb8} .fbtn.orange{background:linear-gradient(#ffb547,#ff8a1c);box-shadow:0 4px 0 #c45f00}
+.fbtn.purple{background:linear-gradient(#a879ff,#7c4ff0);box-shadow:0 4px 0 #5530b8} .fbtn.blue{min-width:150px}
+.fbtn:disabled{filter:saturate(.25) brightness(.95);opacity:.6}
+button{font:inherit;color:var(--ink);background:var(--btn);border:0;border-radius:12px;padding:10px 16px;cursor:pointer}
+button.primary{background:var(--accent);color:#2a1a08;font-weight:700}
+#overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(20,50,70,.42);padding:20px}
+#overlay.show{display:flex}
+.card{background:#fff;border-radius:20px;padding:22px;max-width:350px;width:100%;text-align:center;
+  animation:pop .18s ease-out} /* стартует с видимого состояния, не с opacity:0 (§9) */
+@keyframes pop{from{transform:scale(.96)}to{transform:scale(1)}}
+.card h2{margin:0 0 8px} .card p{color:var(--muted);margin:0 0 16px}
+.card .stars{font-size:34px;color:var(--accent);margin:4px 0 8px;letter-spacing:4px}
+.card button{margin:3px}
+.levels{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:14px 0 8px;max-height:42vh;overflow-y:auto}
+.levels button{padding:8px 0;font-size:14px;background:#e6f4fa;margin:0} .levels button.locked{opacity:.45}
+.levels small{display:block;font-size:10px;color:var(--accent);letter-spacing:1px;min-height:12px}
+.cheat{margin-top:10px;font-size:12px;padding:6px 10px;background:transparent;border:1.5px dashed var(--muted);color:var(--muted)}
+.help{text-align:left;color:var(--ink);font-size:15px;margin:0 0 14px;padding-left:20px} .help li{margin:4px 0}
+#toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:10px;
+  pointer-events:none;opacity:.95;transition:opacity .25s;max-width:90%;text-align:center;font-size:14px}
+#toast.hide{opacity:0}
+@media (prefers-reduced-motion: reduce){ .card{animation:none} #toast{transition:none} }
+</style>
+</head>
+<body>
+<div id="frame">
+  <header><div class="badge"><small>уровень</small><b id="hud-level">1</b></div><span id="hud-moves" class="pill">тапов 0</span><button id="btn-mute" class="round" aria-label="звук"></button></header>
+  <div id="game"><canvas id="gl"></canvas><canvas id="cv"></canvas><div id="tip"></div></div>
+  <footer>
+    <button id="btn-undo" class="fbtn blue" aria-label="Отмена"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M9 7H15a5 5 0 0 1 0 10H8" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/><path d="M10 3 5 7l5 4" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Отмена</span></button>
+    <button id="btn-reset" class="fbtn orange" aria-label="Заново"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M19 12a7 7 0 1 1-2.1-5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/><path d="M18.5 3.5v4.2h-4.2" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button id="btn-menu" class="fbtn purple" aria-label="Меню"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M5 7h14M5 12h14M5 17h14" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg></button>
+  </footer>
+  <div id="overlay"><div class="card" id="card"></div></div>
+  <div id="toast" class="hide"></div>
+</div>
+<!-- three.js 0.185.1, вендорен файлом vendor/three.js (CJS-сборка в обёртке-функции → window.THREE). CDN не используется. -->
+<script src="vendor/three.js"></script>
+<script>
+'use strict';
+/* ЯДРО */
+// ---------------------------------------------------------------------------
+// «Пена в ванне». Пузыри стоят столбиками (снизу вверх), в пузыре до CFG.CAP игрушек.
+// Тап по пузырю — он лопается, его игрушки падают в ближний пузырь ниже в том же столбике.
+//   влезли  → остаются; три одинаковых в пузыре — пузырь улетает вместе с ними;
+//   не влезли → нижний лопается от тяжести, всё падает дальше (цепочка);
+//   ниже пузырей нет → игрушки в общий стаканчик; там тройка тоже улетает; больше cap — проигрыш.
+// Двойной пузырь (hard): первый тап снимает внешнюю плёнку (игрушки на месте), тяжесть сверху лопает его сразу.
+// Победа — игрушек не осталось нигде. Проигрыш — стаканчик переполнен.
+// Ход кодируется числом m = столбик * 16 + номер пузыря снизу.
+// ---------------------------------------------------------------------------
+const CFG = {
+  CAP: 3,                 // мест в пузыре
+  MATCH: 3,               // столько одинаковых игрушек улетают (в пузыре и в стаканчике)
+  CUP_CAP: 4,             // мест в стаканчике по умолчанию (уровень переопределяет полем cup)
+  AIR_MATCH: true,        // в цепочке тройка одинаковых улетает прямо на лету, остаток падает дальше и может влезть
+  GEN_TRIES: 120,         // попыток генератора на уровень (сид от номера уровня, поток детерминирован)
+  BOT_RUNS: 80,           // прогонов бота-новичка при отборе уровня
+  SOLVER_MAX: 150000,     // предел состояний поиска в ширину (защита от зависания)
+  // Кадры анимации хода, мс (делятся на timeScale)
+  T_POP: 110,             // пузырь лопнул, игрушки повисли
+  T_FALL: 240,            // игрушки долетели до пузыря ниже
+  T_FLY: 380,             // тройка в пузыре улетает
+  T_CUP: 300,             // кучка долетела до места над стаканчиком
+  T_CUP_STEP: 170,        // одна игрушка опускается в гнездо (по очереди)
+  T_CLEAR: 320,           // тройка в стаканчике улетает
+  T_OVER: 420,            // стаканчик переполнился
+  END_DELAY: 550,         // пауза между последним кадром и экраном победы/поражения
+  TOAST_MS: 2400,         // сколько висит тост
+  JELLY_MS: 480,          // «желе» пузыря и сплющивание игрушки после приземления, мс
+  STAR2_SLACK: 2,         // звёзды: тапов ≤ par → 3, ≤ par + STAR2_SLACK → 2, иначе 1
+};
+const KIND_NAMES = ['утёнок', 'кит', 'рыбка', 'лягушка', 'кораблик', 'звезда'];
+
+// Контент — декларативная таблица. layout — ручной уровень (столбики снизу вверх; буква = игрушка A..F,
+// '#' в начале — двойной пузырь, '' — пустой). Иначе — генератор по параметрам:
+//   cols — столбиков, maxH — потолок высоты столбика, kinds — видов игрушек, per — игрушек каждого вида (кратно 3),
+//   pure — сколько троек лежат «чистыми» кусками в одном столбике, empty — пустых пузырей, hard — двойных, spread — доля чистых кусков, разбросанных по столбику поодиночке,
+//   cup — мест в стаканчике, minPar — минимум тапов в лучшем решении,
+//   nov — минимум побед бота-новичка, rnd — потолок побед случайного бота (ввод должен быть важен),
+//   minTri — сколько троек в пузыре новичок должен собирать в среднем, chain — лучшее решение обязано содержать цепочку.
+const LEVELS = [
+  { n: 1, layout: [['AA', 'A'], ['BB', 'B']], cup: 4, hint: true,
+    tip: 'Лопни верхний пузырь' },
+  { n: 2, layout: [['A', 'BB', 'AA'], ['B']], cup: 4, hint: true,
+    tip: 'Перегруз лопает пузырь ниже' },
+  { n: 3, cols: 3, maxH: 3, kinds: 2, per: 3, pure: 1, empty: 1, cup: 4, minPar: 3, nov: 0.9, rnd: 1.0, minTri: 0.5,
+    tip: 'Лишнее падает в мыльницу — не переполни' },
+  { n: 4, cols: 3, maxH: 3, kinds: 3, per: 3, pure: 2, spread: 0.5, empty: 0, cup: 3, minPar: 4, nov: 0.8, rnd: 0.6, minTri: 1, chain: true },
+  { n: 5, cols: 4, maxH: 3, kinds: 4, per: 3, pure: 2, spread: 0.5, empty: 1, cup: 3, minPar: 5, nov: 0.75, rnd: 0.5, minTri: 1, chain: true },
+  { n: 6, cols: 3, maxH: 4, kinds: 3, per: 3, pure: 2, spread: 0.5, empty: 0, hard: 1, cup: 3, minPar: 4, nov: 0.75, rnd: 0.5, minTri: 1,
+    tip: 'Двойной пузырь: первый тап снимает плёнку' },
+  { n: 7, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 3, spread: 0.6, empty: 1, hard: 1, cup: 3, minPar: 5, nov: 0.7, rnd: 0.45, minTri: 1.5, chain: true },
+  { n: 8, cols: 4, maxH: 4, kinds: 3, per: 6, pure: 3, spread: 0.6, empty: 0, hard: 1, cup: 3, minPar: 6, nov: 0.65, rnd: 0.4, minTri: 1.5, chain: true },
+  { n: 9, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 3, spread: 0.7, empty: 1, hard: 2, cup: 3, minPar: 6, nov: 0.6, rnd: 0.35, minTri: 1.5, chain: true },
+  { n: 10, cols: 5, maxH: 4, kinds: 6, per: 3, pure: 4, spread: 0.7, empty: 0, hard: 2, cup: 3, minPar: 7, nov: 0.55, rnd: 0.3, minTri: 2, chain: true },
+];
+
+// Детерминированный генератор случайных чисел (PROTO-BASE §5). Math.random() не используется.
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function shuffle(a, rnd){ for (let i = a.length - 1; i > 0; i--){ const j = Math.floor(rnd() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+
+// Раскладка без id: [[{hard, k:[виды]}…]…] — столбики снизу вверх.
+function parseLayout(rows){
+  return rows.map(col => col.map(str => ({ hard: str[0] === '#', k: str.replace('#', '').split('').map(ch => ch.charCodeAt(0) - 65) })));
+}
+function cloneLayout(lay){ return lay.map(col => col.map(b => ({ hard: b.hard, k: b.k.slice() }))); }
+function layoutToState(li, lay, cap, par){
+  let nid = 1;
+  const cols = lay.map(col => col.map(b => ({ id: nid++, hard: b.hard, toys: b.k.map(k => ({ id: nid++, k })) })));
+  return { li, cols, cup: [], cap, moves: 0, par, prev: null, lost: false, why: '',
+           triples: 0, cupClears: 0, airTriples: 0, chains: 0, lastChain: 0, maxChain: 0, cupMax: 0 };
+}
+
+// Генератор раскладки. Тройки делятся на «чистые» (pure штук: все три игрушки вида — в одном столбике, кусками
+// 2+1, 1+2 или 1+1+1 в пузырях без чужих) и «россыпь» (игрушки перемешиваются и раскладываются пузырями по 1..CAP).
+// Чистые куски кладутся подряд, россыпь и пустые пузыри вставляются в случайные места — так между кусками
+// появляются помехи. Смешанный пузырь чистым уже не станет, поэтому тройка в пузыре возможна только из чистых кусков.
+const SPLITS = [[2, 1], [1, 2], [2, 1], [1, 2], [1, 1, 1]];          // как резать чистую тройку (2+1 чаще)
+const CHUNK = [1, 2, 2, 3, 3];                                       // размеры пузырей россыпи (полные чаще — больше цепочек)
+function genLayout(L, rnd){
+  const triples = [];
+  for (let k = 0; k < L.kinds; k++) for (let t = 0; t < L.per / CFG.MATCH; t++) triples.push(k);
+  shuffle(triples, rnd);
+  const cols = Array.from({ length: L.cols }, () => []);
+  const room = (c, n) => cols[c].length + n <= L.maxH;
+  const pickCol = (n) => { const ok = cols.map((_, c) => c).filter(c => room(c, n)); return ok.length ? ok[Math.floor(rnd() * ok.length)] : -1; };
+  const nPure = Math.min(L.pure || 0, triples.length);
+  for (let j = 0; j < nPure; j++){
+    const k = triples[j], split = SPLITS[Math.floor(rnd() * SPLITS.length)], c = pickCol(split.length);
+    if (c < 0) return null;
+    const pieces = split.map(n => ({ hard: false, k: new Array(n).fill(k) }));
+    if (rnd() < (L.spread || 0)) for (const pc of pieces) cols[c].splice(Math.floor(rnd() * (cols[c].length + 1)), 0, pc);
+    else cols[c].splice(Math.floor(rnd() * (cols[c].length + 1)), 0, ...pieces);
+  }
+  const loose = []; for (let j = nPure; j < triples.length; j++) for (let t = 0; t < CFG.MATCH; t++) loose.push(triples[j]);
+  shuffle(loose, rnd);
+  const chunks = [];
+  for (let ti = 0; ti < loose.length;){
+    const n = Math.min(loose.length - ti, CHUNK[Math.floor(rnd() * CHUNK.length)]), k = loose.slice(ti, ti + n); ti += n;
+    if (n === CFG.MATCH && k.every(x => x === k[0])) return null;        // готовая тройка на старте — не годится
+    chunks.push({ hard: false, k });
+  }
+  for (let e = 0; e < (L.empty || 0); e++) chunks.push({ hard: false, k: [] });
+  shuffle(chunks, rnd);
+  for (const ch of chunks){ const c = pickCol(1); if (c < 0) return null; cols[c].splice(Math.floor(rnd() * (cols[c].length + 1)), 0, ch); }
+  if (cols.some(col => !col.length)) return null;
+  const cand = [];                                                     // двойным делаем непустой пузырь, над которым что-то есть
+  cols.forEach(col => col.forEach((b, i) => { if (i < col.length - 1 && b.k.length) cand.push(b); }));
+  if (cand.length < (L.hard || 0)) return null;
+  shuffle(cand, rnd);
+  for (let i = 0; i < (L.hard || 0); i++) cand[i].hard = true;
+  return cols;
+}
+
+// Уровень строится один раз и кешируется: ручной — как есть, генерируемый — первый подходящий из потока сида.
+const LEVEL_CACHE = {};
+function levelLayout(li){
+  if (LEVEL_CACHE[li]) return LEVEL_CACHE[li];
+  const L = LEVELS[li], cap = L.cup || CFG.CUP_CAP;
+  if (L.layout){
+    const lay = parseLayout(L.layout), s = layoutToState(li, lay, cap, 0), sol = solve(s);
+    const st = noviceStats(s);
+    return (LEVEL_CACHE[li] = { lay, par: sol ? sol.length : 0, rate: st.rate, random: randomRate(s), triples: st.triples, d: 0, tries: 0 });
+  }
+  const rnd = mulberry32(7919 * L.n + 13);
+  let best = null;
+  for (let t = 0; t < CFG.GEN_TRIES; t++){
+    const lay = genLayout(L, rnd); if (!lay) continue;
+    const s = layoutToState(li, lay, cap, 0);
+    const sol = solve(s); if (!sol || sol.length < (L.minPar || 2)) continue;
+    const st = noviceStats(s), rr = randomRate(s), sc = pathChains(s, sol);
+    const d = Math.max(0, (L.nov || 0) - st.rate) + Math.max(0, rr - (L.rnd ?? 1))
+            + Math.max(0, (L.minTri || 0) - st.triples) * 0.25           // мало троек в пузыре у новичка — штраф
+            + (L.chain && !sc ? 0.3 : 0);                                // цепочка не нужна для лучшего решения — штраф
+    if (!best || d < best.d) best = { lay, par: sol.length, rate: st.rate, random: rr, triples: st.triples, d, tries: t + 1 };
+    if (d === 0) break;
+  }
+  return (LEVEL_CACHE[li] = best);
+}
+function createState(li){
+  const g = levelLayout(li), L = LEVELS[li];
+  return layoutToState(li, cloneLayout(g.lay), L.cup || CFG.CUP_CAP, g.par);
+}
+
+function cloneState(s){
+  return { ...s, cols: s.cols.map(col => col.map(b => ({ id: b.id, hard: b.hard, toys: b.toys.slice() }))), cup: s.cup.slice() };
+}
+function toysLeft(s){ let n = s.cup.length; for (const col of s.cols) for (const b of col) n += b.toys.length; return n; }
+function legalMoves(s){
+  const out = []; if (s.lost) return out;
+  s.cols.forEach((col, c) => col.forEach((b, i) => out.push(c * 16 + i)));
+  return out;
+}
+function isWin(s){ return toysLeft(s) === 0; }
+function isLose(s){ return s.lost; }
+
+// Тройки одинаковых из набора игрушек (без изменения набора) — для «тройки на лету».
+function takeTriples(toys){
+  const by = {}, out = [];
+  for (const t of toys) (by[t.k] = by[t.k] || []).push(t);
+  for (const k in by) for (let q = 0; q + CFG.MATCH <= by[k].length; q += CFG.MATCH) out.push(...by[k].slice(q, q + CFG.MATCH));
+  return out;
+}
+// Порядок, в котором кучка опускается в стаканчик: сначала игрушки видов, которые соберут тройку (больше своих
+// уже в стаканчике — раньше), затем остальные; одинаковые подряд. Детерминированно.
+function orderForCup(cup, falling){
+  const cnt = {}, tot = {};
+  for (const t of cup){ cnt[t.k] = (cnt[t.k] || 0) + 1; tot[t.k] = (tot[t.k] || 0) + 1; }
+  for (const t of falling) tot[t.k] = (tot[t.k] || 0) + 1;
+  const score = (t) => (tot[t.k] >= CFG.MATCH ? 100 : 0) + (cnt[t.k] || 0) * 10;
+  return falling.slice().sort((a, b) => score(b) - score(a) || a.k - b.k);
+}
+// Игрушка встаёт в стаканчик рядом со своими (после последней такой же), иначе — в конец.
+function insertGrouped(cup, toy){
+  let at = -1; for (let i = 0; i < cup.length; i++) if (cup[i].k === toy.k) at = i;
+  if (at < 0) cup.push(toy); else cup.splice(at + 1, 0, toy);
+}
+// Тройки в стаканчике улетают; возвращает улетевшие игрушки.
+function clearCup(s){
+  const gone = [];
+  for (;;){
+    const cnt = {}; let hit = -1;
+    for (const t of s.cup){ cnt[t.k] = (cnt[t.k] || 0) + 1; if (cnt[t.k] >= CFG.MATCH){ hit = t.k; break; } }
+    if (hit < 0) return gone;
+    let left = CFG.MATCH;
+    s.cup = s.cup.filter(t => { if (t.k === hit && left > 0){ left--; gone.push(t); return false; } return true; });
+  }
+}
+// Снимок для анимации: оболочка тянет каждую игрушку и пузырь по id от снимка к снимку.
+function snap(s, air, ev, dur){
+  return { cols: s.cols.map(col => col.map(b => ({ id: b.id, hard: b.hard, toys: b.toys.slice() }))), cup: s.cup.slice(), cap: s.cap,
+           air: air ? { c: air.c, at: air.at, cup: !!air.cup, toys: air.toys.slice() } : null, ev, dur };
+}
+
+// Ход. frames (необязательно) — сюда пишутся снимки для анимации. Нелегальный ход → null.
+function applyMove(s, m, frames){
+  const c = m >> 4, i = m & 15, col0 = s.cols[c];
+  if (s.lost || !col0 || !col0[i]) return null;
+  const n = cloneState(s); n.prev = s; n.moves++;
+  const col = n.cols[c];
+  if (col[i].hard){                                                    // двойной: тап снимает только плёнку
+    col[i].hard = false; n.lastChain = 0;
+    if (frames) frames.push(snap(n, null, [{ t: 'film', id: col[i].id }], CFG.T_POP));
+    return n;
+  }
+  const b = col.splice(i, 1)[0];
+  let falling = b.toys, j = i - 1, chain = 0;
+  if (frames) frames.push(snap(n, falling.length ? { c, at: i, toys: falling } : null, [{ t: 'pop', id: b.id, chain: 0 }], CFG.T_POP));
+  while (falling.length){
+    if (j < 0){                                                        // ниже пузырей нет — в стаканчик
+      // Кучка зависает над стаканчиком, игрушки опускаются по одной: каждая встаёт рядом со своими, три одинаковых
+      // сразу улетают. Первыми идут те, что собирают тройку. Нет места и тройки не собрать — переполнение.
+      let pend = orderForCup(n.cup, falling);
+      if (frames) frames.push(snap(n, { cup: true, toys: pend }, [{ t: 'cupHover' }], CFG.T_CUP));
+      while (pend.length){
+        const toy = pend[0]; pend = pend.slice(1);
+        insertGrouped(n.cup, toy); n.cupMax = Math.max(n.cupMax, n.cup.length);
+        if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'cup', id: toy.id }], CFG.T_CUP_STEP));
+        const gone = clearCup(n);
+        if (gone.length){ n.cupClears += gone.length / CFG.MATCH; if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'cupClear', toys: gone }], CFG.T_CLEAR)); }
+        if (n.cup.length > n.cap){ n.lost = true; n.why = 'cup'; n.overId = toy.id; if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'overflow', id: toy.id }], CFG.T_OVER)); break; }
+      }
+      break;
+    }
+    const tb = col[j];
+    if (tb.toys.length + falling.length <= CFG.CAP){                   // влезли
+      tb.toys = tb.toys.concat(falling);
+      if (frames) frames.push(snap(n, null, [{ t: 'land', id: tb.id }], CFG.T_FALL));
+      if (tb.toys.length === CFG.MATCH && tb.toys.every(t => t.k === tb.toys[0].k)){
+        col.splice(j, 1); n.triples++;
+        if (frames) frames.push(snap(n, null, [{ t: 'fly', id: tb.id, toys: tb.toys.slice(), k: tb.toys[0].k }], CFG.T_FLY));
+      }
+      break;
+    }
+    col.splice(j, 1); chain++;                                         // не влезли — лопается от тяжести
+    falling = tb.toys.concat(falling);
+    if (frames) frames.push(snap(n, { c, at: j, toys: falling }, [{ t: 'pop', id: tb.id, chain }], CFG.T_FALL));
+    if (CFG.AIR_MATCH){
+      const gone = takeTriples(falling); falling = falling.filter(t => !gone.includes(t));
+      if (gone.length){ n.airTriples += gone.length / CFG.MATCH; if (frames) frames.push(snap(n, falling.length ? { c, at: j, toys: falling } : null, [{ t: 'airClear', toys: gone }], CFG.T_CLEAR)); }
+    }
+    j--;
+  }
+  n.lastChain = chain; n.chains += chain; n.maxChain = Math.max(n.maxChain, chain);
+  return n;
+}
+function undoMove(s){ return s.prev || s; }
+
+// Ключ состояния без id — для поиска.
+function stateKey(s){
+  return s.cols.map(col => col.map(b => (b.hard ? '#' : '') + b.toys.map(t => t.k).sort().join('')).join('.')).join('|')
+    + '>' + s.cup.map(t => t.k).sort().join('');
+}
+// Поиск в ширину: кратчайшее по тапам решение (список ходов) или null.
+function solve(s){
+  if (isWin(s)) return [];
+  const seen = new Set([stateKey(s)]); let layer = [{ s, path: [] }];
+  while (layer.length){
+    const next = [];
+    for (const node of layer){
+      for (const m of legalMoves(node.s)){
+        const n = applyMove(node.s, m); if (n.lost) continue;
+        const k = stateKey(n); if (seen.has(k)) continue; seen.add(k);
+        const path = node.path.concat(m);
+        if (isWin(n)) return path;
+        n.prev = null; next.push({ s: n, path });
+        if (seen.size > CFG.SOLVER_MAX) return null;
+      }
+    }
+    layer = next;
+  }
+  return null;
+}
+
+// Боты (PROTO-BASE §6): случайный; новичок — не делает ход, проигрывающий сразу, и берёт любой ход, который что-то
+// убирает, иначе случайный; жадный — максимум убранных игрушек за ход, при равенстве меньше в стаканчике.
+function pickRandom(s, rnd){ const ms = legalMoves(s); return ms[Math.floor(rnd() * ms.length)]; }
+function pickNovice(s, rnd){
+  const left = toysLeft(s);
+  const opts = legalMoves(s).map(m => { const n = applyMove(s, m); return { m, gain: left - toysLeft(n), lose: n.lost }; });
+  const safe = opts.filter(o => !o.lose), pool = safe.length ? safe : opts;
+  const good = pool.filter(o => o.gain > 0), from = good.length ? good : pool;
+  return from[Math.floor(rnd() * from.length)].m;
+}
+function pickGreedy(s){
+  let best = null, bs = -Infinity; const left = toysLeft(s);
+  for (const m of legalMoves(s)){
+    const n = applyMove(s, m), sc = n.lost ? -1000 : (left - toysLeft(n)) * 10 - n.cup.length;
+    if (sc > bs){ bs = sc; best = m; }
+  }
+  return best;
+}
+function botRun(s, pick, seed){
+  const rnd = mulberry32(seed); let chainTaps = 0;
+  while (!isWin(s) && !isLose(s)){ s = applyMove(s, pick(s, rnd)); s.prev = null; if (s.lastChain > 0) chainTaps++; }
+  return { win: isWin(s), moves: s.moves, par: s.par, why: s.why, chainTaps, triples: s.triples, cupClears: s.cupClears, airTriples: s.airTriples, cupMax: s.cupMax, maxChain: s.maxChain };
+}
+// Доля побед новичка и среднее число троек, собранных прямо в пузыре (главное «ага» механики).
+function noviceStats(s0){
+  let w = 0, tri = 0;
+  for (let k = 0; k < CFG.BOT_RUNS; k++){ const r = botRun(s0, pickNovice, 500 + k); w += r.win ? 1 : 0; tri += r.triples; }
+  return { rate: w / CFG.BOT_RUNS, triples: tri / CFG.BOT_RUNS };
+}
+// Сколько тапов лучшего решения запускают цепочку (лопанье от тяжести).
+function pathChains(s, path){ let n = 0; for (const m of path){ s = applyMove(s, m); if (s.lastChain > 0) n++; } return n; }
+function randomRate(s0){ let w = 0; for (let k = 0; k < CFG.BOT_RUNS; k++) w += botRun(s0, pickRandom, 900 + k).win ? 1 : 0; return w / CFG.BOT_RUNS; }
+function randomRun(li, seed){ return botRun(createState(li), pickRandom, seed); }
+function noviceRun(li, seed){ return botRun(createState(li), pickNovice, seed); }
+function greedyRun(li){ return botRun(createState(li), pickGreedy, 1); }
+/* КОНЕЦ ЯДРА */
+
+// ---------------------------------------------------------------------------
+// Оболочка: экраны, ввод, рендер, звук, сейв, дебаг-хук. Время абсолютное (§4): now() = performance.now() + skew.
+// ---------------------------------------------------------------------------
+const NAME = 'pena-v-vanne';
+const T0 = performance.now();
+function log(kind, name, info){            // журнал [game] — одна строка на событие (§11)
+  console.log('[game] ' + JSON.stringify({ t: +((now() - T0) / 1000).toFixed(3), kind, name, info: info === undefined ? '' : String(info) }));
+}
+
+const SAVE_KEY = NAME + '.v1';
+function loadSave(){ try { return JSON.parse(localStorage.getItem(SAVE_KEY)) || {}; } catch (e) { return {}; } }
+function save(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify(G.save)); } catch (e) {} }
+
+const G = {
+  s: null,                       // состояние ядра (уже после последнего хода)
+  screen: 'menu',                // menu | game | win | lose | help
+  save: Object.assign({ level: 0, muted: false, best: {}, unlockAll: false, seenTips: {} }, loadSave()),   // unlockAll — чит (PROTO-BASE §6)
+  anim: null,                    // проигрывание хода: { frames, starts, end, k }
+  fx: [],                        // эффекты: { type, t0, until, … } — дедлайны в абсолютном времени
+  wob: {},                       // id тугого пузыря → когда начал дрожать
+  ending: 0,                     // когда показать win/lose, 0 = не ждём
+  hintMove: -1,                  // подсказка-палец на обучающих уровнях
+  squash: {},                    // id игрушки → когда приземлилась (сплющивание)
+  press: null,                   // { id, t } — пузырь под пальцем (вдавливается до отпускания)
+  combo: 0,                      // троек за текущий ход (подпись «комбо»)
+  timeScale: 1,
+  paused: false,
+  skew: 0,                       // сдвиг часов для drive(): ручной прогон игрового времени
+  maxH: 3,                       // высота самого высокого столбика на старте уровня (для раскладки)
+};
+function now(){ return performance.now() + G.skew; }
+
+// --- звук: WebAudio-синтез без файлов, ленивый старт по первому жесту (§8) ---
+const Snd = {
+  ac: null, noise: null,
+  init(){
+    if (!this.ac){
+      try {
+        this.ac = new (window.AudioContext || window.webkitAudioContext)();
+        const len = Math.floor(this.ac.sampleRate * 0.3), buf = this.ac.createBuffer(1, len, this.ac.sampleRate), d = buf.getChannelData(0), r = mulberry32(99);
+        for (let i = 0; i < len; i++) d[i] = r() * 2 - 1;
+        this.noise = buf;
+      } catch (e) { this.ac = null; }
+    }
+    if (this.ac && this.ac.state === 'suspended') try { this.ac.resume(); } catch (e) {}
+  },
+  ok(){ return this.ac && !G.save.muted; },
+  tone(f0, f1, ms, type, vol, delay){                     // тон с глиссандо f0 → f1
+    if (!this.ok()) return;
+    const ac = this.ac, t = ac.currentTime + (delay || 0), o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + ms / 1000);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + ms / 1000 + 0.03);
+  },
+  hiss(freq, ms, vol, delay){                             // шумовой «пшик» через полосовой фильтр
+    if (!this.ok() || !this.noise) return;
+    const ac = this.ac, t = ac.currentTime + (delay || 0), src = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = this.noise; f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = 1.4;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+    src.connect(f).connect(g).connect(ac.destination); src.start(t); src.stop(t + ms / 1000 + 0.02);
+  },
+  pop(chain){ const f = (700 + chain * 180) * (0.93 + 0.14 * Math.random()); this.hiss(f * 2.6, 55, 0.42); this.tone(f * 0.6, f * 1.5, 35, 'sine', 0.22); this.tone(f * 1.4, f * 0.5, 90, 'sine', 0.26, 0.03); log('sound', 'pop', 'chain=' + chain); },
+  press(){ this.tone(200, 260, 50, 'sine', 0.08); },
+  land(d){ this.tone(330, 180, 110, 'sine', 0.2, d); this.hiss(900, 70, 0.12, d); log('sound', 'land'); },
+  fly(combo){ const up = Math.pow(1.122, Math.min(6, combo || 0)); [784, 988, 1319, 1568].forEach((f, i) => this.tone(f * up, f * up * 1.03, 160, 'triangle', 0.15, i * 0.055)); this.hiss(5200, 260, 0.08, 0.05); log('sound', 'fly', 'combo=' + (combo || 0)); },
+  cup(d, n){ const f = 440 * Math.pow(1.19, (n || 1) - 1); this.tone(f, f * 0.8, 80, 'triangle', 0.16, d); log('sound', 'cup', 'n=' + (n || 1)); },
+  whoosh(){ this.hiss(1500, 160, 0.08); },
+  cupClear(){ [659, 880, 1175].forEach((f, i) => this.tone(f, f, 120, 'triangle', 0.15, i * 0.06)); log('sound', 'cupClear'); },
+  thud(){ this.tone(150, 105, 120, 'sine', 0.32); log('sound', 'thud'); },
+  over(){ this.tone(230, 110, 400, 'sawtooth', 0.11); log('sound', 'overflow'); },
+  win(){ [523, 659, 784, 1047].forEach((f, i) => this.tone(f, f, 220, 'sine', 0.2, i * 0.09)); log('sound', 'win'); },
+  lose(){ [392, 330, 262].forEach((f, i) => this.tone(f, f * 0.97, 230, 'triangle', 0.16, i * 0.12)); log('sound', 'lose'); },
+};
+function buzz(ms){ try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
+
+// --- экраны: DOM-оверлеи, любой открывается кодом или хешем (§6, §11) ---
+const $ = (id) => document.getElementById(id);
+function isOpen(li){ return G.save.unlockAll || li <= G.save.level; }
+function setUnlockAll(on){ G.save.unlockAll = !!on; save(); log('event', 'cheat', 'unlockAll=' + G.save.unlockAll); }
+const starStr = (n) => '★'.repeat(n) + '☆'.repeat(3 - n);
+function goto(screen, payload){
+  G.screen = screen; log('screen', screen);
+  const ov = $('overlay'), card = $('card');
+  if (screen === 'game'){ ov.classList.remove('show'); return; }
+  ov.classList.add('show');
+  if (screen === 'menu'){
+    let lv = '';
+    for (let i = 0; i < LEVELS.length; i++){
+      const b = G.save.best[i] || 0;
+      lv += `<button data-act="lvl" data-li="${i}" class="${isOpen(i) ? '' : 'locked'}">${isOpen(i) ? i + 1 : '🔒'}<small>${b ? '★'.repeat(b) : ''}</small></button>`;
+    }
+    card.innerHTML = `<h2>Пена в ванне</h2><p>Лопай пузыри — игрушки падают ниже. Уровень ${G.save.level + 1} из ${LEVELS.length}</p>
+      <button class="primary" data-act="play">Играть</button> <button data-act="help">Как играть</button>
+      <div class="levels">${lv}</div>
+      ${G.save.unlockAll ? '<button class="cheat" data-act="relock">Чит включён · закрыть обратно</button>' : '<button class="cheat" data-act="unlock">Чит: открыть все уровни</button>'}
+      <button class="cheat" data-act="wipe">Сбросить прогресс</button>`;
+  }
+  if (screen === 'help') card.innerHTML = `<h2>Как играть</h2><ul class="help">
+      <li>Тапни пузырь — он лопнет, игрушки упадут в пузырь ниже.</li>
+      <li>В пузыре 3 места. Не влезли — нижний лопается, и всё летит дальше.</li>
+      <li>Три одинаковых в пузыре — пузырь улетает. В цепочке тройка улетает прямо на лету.</li>
+      <li>Ниже пузырей — стаканчик. Там тройка тоже улетает, а переполнится — уровень заново.</li>
+      <li>Двойной пузырь: первый тап снимает плёнку, а тяжесть сверху лопает его сразу.</li></ul>
+      <button class="primary" data-act="menu">Понятно</button>`;
+  if (screen === 'win') card.innerHTML = `<h2>Ванна чистая!</h2><div class="stars">${payload ? payload.stars : ''}</div><p>${payload ? payload.text : ''}</p>
+      <button class="primary" data-act="next">Дальше</button> <button data-act="retry">Ещё раз</button>`;
+  if (screen === 'lose'){
+    const why = 'Стаканчик переполнился.';
+    card.innerHTML = `<h2>Упс!</h2><p>${why}</p><button class="primary" data-act="retry">Заново</button> <button data-act="undo">Отменить ход</button> <button data-act="menu">Меню</button>`;
+  }
+}
+$('card').addEventListener('click', (e) => {
+  const el = e.target && e.target.closest ? e.target.closest('button') : null;
+  const act = el && el.dataset && el.dataset.act; if (!act) return;
+  Snd.init(); log('input', 'button', act);
+  if (act === 'play') startLevel(G.save.level);
+  else if (act === 'retry') startLevel(G.s ? G.s.li : G.save.level);
+  else if (act === 'next') startLevel(Math.min((G.s ? G.s.li + 1 : G.save.level), LEVELS.length - 1));
+  else if (act === 'undo'){ goto('game'); undo(); }
+  else if (act === 'help') goto('help');
+  else if (act === 'lvl'){ const li = +el.dataset.li; if (isOpen(li)) startLevel(li); else toast('Сначала пройди уровень ' + (G.save.level + 1)); }
+  else if (act === 'unlock' || act === 'relock'){ setUnlockAll(act === 'unlock'); goto('menu'); }
+  else if (act === 'wipe'){ G.save = { level: 0, muted: G.save.muted, best: {}, unlockAll: false, seenTips: {} }; save(); goto('menu'); }
+  else goto('menu');
+});
+window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (h === 'game' && !G.s) startLevel(G.save.level); else if (h && h !== G.screen) goto(h); });
+
+let toastUntil = 0;
+function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.remove('hide'); toastUntil = now() + CFG.TOAST_MS; }
+
+function startLevel(li){
+  G.s = createState(li); G.fx = []; G.wob = {}; G.squash = {}; G.press = null; G.anim = null; G.ending = 0;
+  if (R3.ok){ for (const o of R3.toyObj.values()) R3.scene.remove(o); R3.toyObj.clear(); for (const o of R3.bubObj.values()) R3.scene.remove(o); R3.bubObj.clear(); }
+  G.maxH = Math.max(...G.s.cols.map(c => c.length));
+  const L = LEVELS[li];
+  G.hintMove = L.hint ? ((solve(G.s) || [])[0] ?? -1) : -1;
+  $('tip').textContent = L.tip || '';
+  log('event', 'level.start', 'level=' + (li + 1) + ' par=' + G.s.par + ' cup=' + G.s.cap);
+  goto('game'); fit(); hud();
+}
+function hud(){
+  $('hud-level').textContent = String(G.s ? G.s.li + 1 : 1);
+  $('hud-moves').textContent = G.s ? 'тапов ' + G.s.moves : '';
+  $('btn-mute').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="#fff"/>'
+    + (G.save.muted ? '<path d="M16 9l5 6M21 9l-5 6" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>' : '<path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>') + '</svg>';
+  $('btn-undo').disabled = !(G.s && G.s.prev);
+}
+
+// Тап по пузырю (c — столбик, i — номер снизу). Идущая анимация прошлого хода доигрывается мгновенно.
+function tapBubble(c, i){
+  if (!G.s || G.screen !== 'game' || G.ending) return;
+  const b = G.s.cols[c] && G.s.cols[c][i]; if (!b) return;
+  if (G.anim){ G.anim = null; log('fx.end', 'move', 'skipped'); }
+  const frames = [snap(G.s, null, [], 0)];
+  const n = applyMove(G.s, c * 16 + i, frames); if (!n) return;
+  log('input', 'tap', 'c=' + c + ' i=' + i);
+  G.s = n; G.hintMove = -1; buzz(10);
+  startAnim(frames); hud();
+  if (isWin(n)){ G.ending = G.anim.end + CFG.END_DELAY; log('event', 'level.win', 'moves=' + n.moves + ' par=' + n.par); }
+  else if (isLose(n)){ G.ending = G.anim.end + CFG.END_DELAY; log('event', 'level.lose', 'why=' + n.why + ' moves=' + n.moves); }
+}
+function startAnim(frames){
+  const t = now(), starts = [t]; let acc = t;
+  for (let k = 1; k < frames.length; k++){ starts.push(acc); acc += frames[k].dur / G.timeScale; }
+  G.anim = { frames, starts, end: acc, k: 0 }; G.combo = 0;
+  log('fx.start', 'move', 'frames=' + (frames.length - 1));
+}
+// События кадра — звук, эффекты, журнал. Позиции берутся из предыдущего снимка (там пузырь ещё был).
+function fireEvents(F, prevF){
+  const lay = layoutFrame(prevF), t = now(), landAt = F.dur / G.timeScale, landSec = landAt / 1000;
+  const landToys = (ids, at) => { for (const id of ids) G.squash[id] = at; };
+  const say = (x, y, text, big) => G.fx.push({ type: 'text', x, y, text, big: !!big, t0: t, until: t + (big ? 1000 : 750) / G.timeScale });
+  const triple = (x, y, label) => { G.combo++; if (G.combo >= 2) say(W / 2, y - GEO.r * 2.2, 'Комбо ×' + G.combo + '!', true); else say(x, y, label); };
+  for (const e of F.ev){
+    if (e.t === 'pop'){
+      const p = lay.get(e.id); Snd.pop(e.chain); if (e.chain) buzz(12);
+      if (p){
+        if (!R3.ok) G.fx.push({ type: 'pop', x: p.x, y: p.y, r: p.s, t0: t, until: t + 360 / G.timeScale, chain: e.chain });
+        spawnPop(p.x, p.y, p.s, e.chain);
+        G.fx.push({ type: 'shake', amp: 1.5 + e.chain * 3, t0: t, until: t + 220 / G.timeScale });
+        if (e.chain >= 2) say(p.x, p.y - p.s, 'цепочка ×' + (e.chain + 1));
+      }
+      log('event', 'pop', 'chain=' + e.chain);
+    } else if (e.t === 'land'){
+      G.wob[e.id] = t + landAt; Snd.land(landSec);
+      for (const col of F.cols) for (const b of col) if (b.id === e.id) landToys(b.toys.map(x => x.id), t + landAt);
+    } else if (e.t === 'film'){
+      const p = lay.get(e.id); G.wob[e.id] = t; Snd.thud(); buzz(12);
+      if (p){ if (!R3.ok) G.fx.push({ type: 'pop', x: p.x, y: p.y, r: p.s * 1.04, t0: t, until: t + 300 / G.timeScale, chain: 0 }); spawnPop(p.x, p.y, p.s * 1.04, 0); }
+      log('event', 'film');
+    } else if (e.t === 'fly'){
+      const p = lay.get(e.id); Snd.fly(G.combo); buzz([10, 30, 10]);
+      if (p){ if (R3.ok) spawnFlyer(p.x, p.y, p.s, e.k); else G.fx.push({ type: 'fly', x: p.x, y: p.y, r: p.s, k: e.k, t0: t, until: t + 700 / G.timeScale }); spawnSparks(p.x, p.y, 0, 14, 1); triple(p.x, p.y - p.s * 1.1, '×3'); }
+      log('event', 'triple', 'kind=' + KIND_NAMES[e.k]);
+    } else if (e.t === 'cupHover'){ Snd.whoosh(); }
+    else if (e.t === 'cup'){
+      Snd.cup(landSec, F.cup.length); landToys([e.id], t + landAt);
+    } else if (e.t === 'airClear' || e.t === 'cupClear'){
+      const air = e.t === 'airClear'; Snd.fly(G.combo); buzz([10, 30, 10]);
+      // тройка съезжается к средней игрушке и лопается в одной точке — видно, что убрались именно эти три
+      const mid = lay.get(e.toys[1].id) || lay.get(e.toys[0].id);
+      for (const toy of e.toys){
+        const p = lay.get(toy.id); if (!p) continue;
+        if (R3.ok) spawnToyPop(p.x, p.y, p.z || 0, p.s, toy.k, mid.x, mid.y);
+        else G.fx.push({ type: 'clear', x: p.x, y: p.y, s: p.s, k: toy.k, t0: t, until: t + 480 / G.timeScale });
+      }
+      if (mid) setTimeout(() => spawnSparks(mid.x, mid.y, mid.z || 0, 18, 1.1), 150 / G.timeScale);
+      const p0 = mid;
+      if (p0) triple(air ? W / 2 : p0.x, air ? p0.y - GEO.r * 1.9 : GEO.cupY - GEO.cupH * 0.8, air ? '×3 на лету!' : '×3');
+      log('event', air ? 'air.triple' : 'cup.clear', 'kind=' + KIND_NAMES[e.toys[0].k]);
+    } else if (e.t === 'overflow'){
+      Snd.over(); buzz(80); G.fx.push({ type: 'shake', amp: 10, t0: t, until: t + 480 / G.timeScale });
+      log('event', 'overflow');
+    }
+  }
+}
+function finishEnding(){
+  G.ending = 0;
+  if (isWin(G.s)){
+    const li = G.s.li, m = G.s.moves, p = G.s.par;
+    const stars = m <= p ? 3 : m <= p + CFG.STAR2_SLACK ? 2 : 1;
+    G.save.best[li] = Math.max(G.save.best[li] || 0, stars);
+    G.save.level = Math.max(G.save.level, Math.min(li + 1, LEVELS.length - 1)); save();
+    Snd.win(); buzz([20, 40, 20]); spawnConfetti(V3.CONFETTI);
+    log('event', 'reward', 'stars=' + stars);
+    goto('win', { stars: starStr(stars), text: 'Тапов: ' + m + ' · лучший путь: ' + p + (G.s.maxChain ? ' · цепочка ×' + (G.s.maxChain + 1) : '') });
+  } else { Snd.lose(); goto('lose'); }
+}
+function undo(){
+  if (!G.s || !G.s.prev) return;
+  G.s = undoMove(G.s); G.anim = null; G.ending = 0; G.fx = []; log('input', 'undo'); hud();
+}
+
+// --- геометрия: виртуальная ширина VW, всё в виртуальных юнитах (§2) ---
+const cv = $('cv'), ctx = cv.getContext('2d');
+const VW = 400;
+let scale = 1, W = VW, H = 600, DPR = 1, GEO = null;
+function computeGeo(){
+  const nc = G.s ? G.s.cols.length : 3;
+  const cupH = 84, cupY = H - 14 - cupH / 2;                  // центр мыльницы
+  const waterY = cupY - cupH / 2 - 32;                        // поверхность воды
+  const colW = Math.min(124, (W - 14) / nc);
+  let r = Math.min(58, colW * 0.47);                          // пузыри крупнее: поле занимает всю высоту
+  r = Math.min(r, (waterY - 80) / (G.maxH * 1.8 + 0.2));      // сверху запас под всплывающие подписи
+  const step = r * 1.8;                                       // шаг пузырей в столбике (лёгкое перекрытие пены)
+  return { nc, colW, r, step, waterY, baseY: waterY - r - 10, cupY, cupH };   // низ пузыря на 10 px выше воды и пены
+}
+function bubbleXY(c, i){ return { x: W / 2 + (c - (GEO.nc - 1) / 2) * GEO.colW, y: GEO.baseY - i * GEO.step }; }
+const TOY_K = 0.38;                                         // размер игрушки в долях радиуса пузыря (когда их три)
+const TOY_BY_N = [0, 0.46, 0.38, 0.28];                     // одна ≈0,62 D, две ≈0,44 D, три ≈0,36 D (видимый размер = TOY_FIT × s)
+// Места игрушек внутри пузыря (доли радиуса): 1, 2 или 3 штуки.
+const SLOT_OFS = [[], [[0, 0.04]], [[-0.45, 0.08], [0.45, 0.08]], [[-0.4, 0.26], [0.4, 0.26], [0, -0.33]]];
+// Гнёзда мыльницы: ровно cap мест, позиции не зависят от числа игрушек (игрушка всегда встаёт в своё гнездо).
+// hoverY — ряд над мыльницей: там висит падающая кучка и лишняя игрушка при переполнении.
+function cupSlots(n, cap){
+  const sw = Math.min(78, (W - 60) / cap), w = cap * sw + 34, x0 = W / 2 - (cap * sw) / 2;
+  return { w, sw, x: (i) => x0 + sw * (i + 0.5), y: GEO.cupY, s: sw * 0.29, hoverY: GEO.cupY - GEO.cupH * 0.98,
+           hx: (i, n2) => W / 2 + (i - (n2 - 1) / 2) * sw * 0.72 };
+}
+// Раскладка снимка: id → { x, y, s } (для пузыря s — радиус, для игрушки — размер).
+function layoutFrame(F){
+  const m = new Map(), r = GEO.r, ts = r * TOY_K;   // ts — размер игрушек в полёте
+  F.cols.forEach((col, c) => col.forEach((b, i) => {
+    const p = bubbleXY(c, i); m.set(b.id, { x: p.x, y: p.y, s: r, hard: b.hard, bubble: true });
+    const ofs = SLOT_OFS[Math.min(3, b.toys.length)];
+    const bs = r * TOY_BY_N[Math.min(3, b.toys.length)];
+    b.toys.forEach((t, k) => m.set(t.id, { x: p.x + ofs[k][0] * r, y: p.y + ofs[k][1] * r, s: bs, k: t.k }));
+  }));
+  const cs = cupSlots(F.cup.length, F.cap);
+  if (F.air && F.air.cup){                                    // кучка висит над мыльницей
+    F.air.toys.forEach((t, k) => m.set(t.id, { x: cs.hx(k, F.air.toys.length), y: cs.hoverY, s: cs.s, k: t.k, z: V3.CUP_Z + 0.75, air: true }));
+  } else if (F.air){
+    const p = bubbleXY(F.air.c, F.air.at), n = F.air.toys.length, per = 3;
+    F.air.toys.forEach((t, k) => {
+      const row = Math.floor(k / per), inRow = Math.min(per, n - row * per), col = k % per;
+      m.set(t.id, { x: p.x + (col - (inRow - 1) / 2) * ts * 2.25, y: p.y + row * ts * 1.9 - (Math.ceil(n / per) - 1) * ts * 0.95, s: ts, k: t.k });
+    });
+  }
+  // Стаканчик полон, а прилетела ещё одна (собирает тройку или переполняет): новенькая не сдвигает соседей, а встаёт
+  // над своей парой (или над серединой), остальные стоят в своих гнёздах.
+  const ev = F.ev || [];                                     // у итогового кадра (после анимации) событий может не быть
+  const extra = F.cup.length > F.cap ? (ev.find(e => (e.t === 'cup' || e.t === 'overflow') && e.id) || {}).id : undefined;
+  let slot = 0, spill = 0;
+  const spillN = Math.max(0, F.cup.length - (extra !== undefined ? 1 : 0) - F.cap);
+  F.cup.forEach((t) => {
+    if (t.id === extra) return;
+    if (slot < F.cap) m.set(t.id, { x: cs.x(slot), y: cs.y, s: cs.s, k: t.k, z: V3.CUP_Z + 0.75, cup: true });
+    else m.set(t.id, { x: cs.hx(spill++, spillN), y: cs.hoverY, s: cs.s, k: t.k, z: V3.CUP_Z + 0.75, over: true });   // сверх мест (страховка)
+    slot++;
+  });
+  if (extra !== undefined){
+    const t = F.cup.find(x => x.id === extra), mates = F.cup.filter(x => x.k === t.k && x.id !== extra).map(x => m.get(x.id)).filter(Boolean);
+    const gx = mates.length ? mates.reduce((a, q) => a + q.x, 0) / mates.length : W / 2;
+    m.set(extra, { x: gx, y: cs.y - cs.sw * 0.62, s: cs.s, k: t.k, z: V3.CUP_Z + 0.95, over: ev.some(e => e.t === 'overflow') });
+  }
+  return m;
+}
+
+// --- ввод: Pointer Events, порог тап/драг 10 px, pointercancel = pointerup (§3) ---
+let down = null;
+function toVirtual(e){ const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale }; }
+function bubbleAt(p){
+  if (!G.s || !GEO) return null;
+  let best = null, bd = Infinity;
+  G.s.cols.forEach((col, c) => col.forEach((b, i) => {
+    const q = bubbleXY(c, i), d = Math.hypot(p.x - q.x, p.y - q.y);
+    if (d < GEO.r * 1.08 && d < bd){ bd = d; best = { c, i }; }
+  }));
+  return best;
+}
+cv.addEventListener('pointerdown', (e) => { Snd.init(); down = toVirtual(e); down.id = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  const hit = bubbleAt(down); if (hit && G.s && !G.ending){ G.press = { id: G.s.cols[hit.c][hit.i].id, t: now() }; Snd.press(); } });
+function onUp(e){
+  if (!down || e.pointerId !== down.id) return;
+  const p = toVirtual(e), moved = Math.hypot(p.x - down.x, p.y - down.y) > 10 / scale;
+  const start = down; down = null; G.press = null;
+  if (moved || e.type === 'pointercancel') return;
+  const hit = bubbleAt(start); if (hit) tapBubble(hit.c, hit.i);
+}
+cv.addEventListener('pointerup', onUp); cv.addEventListener('pointercancel', onUp);
+document.addEventListener('keydown', (e) => {          // дубли на клавиатуру для отладки (§3): цифра — верхний тапабельный пузырь столбика
+  if (e.key >= '1' && e.key <= '9' && G.s){
+    const c = +e.key - 1, col = G.s.cols[c]; if (!col) return;
+    if (col.length) tapBubble(c, col.length - 1);
+  }
+  if (e.key === 'z' || e.key === 'u') undo();
+  if (e.key === 'r' && G.s) startLevel(G.s.li);
+  if (e.key === 'm') goto('menu');
+  if (e.key === 'h' && G.s){ G.hintMove = (solve(G.s) || [])[0] ?? -1; }
+});
+$('btn-undo').onclick = () => { log('input', 'button', 'undo'); undo(); };
+$('btn-reset').onclick = () => { log('input', 'button', 'reset'); startLevel(G.s ? G.s.li : 0); };
+$('btn-menu').onclick = () => { log('input', 'button', 'menu'); goto('menu'); };
+$('btn-mute').onclick = () => { Snd.init(); G.save.muted = !G.save.muted; save(); hud(); log('input', 'button', 'mute=' + G.save.muted); };
+
+// --- размер: resize + orientationchange + периодический пересчёт (§2) ---
+let PAL = null;
+function fit(){
+  const r = $('game').getBoundingClientRect(); if (!r.width || !r.height) return;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  scale = r.width / VW; W = VW; H = r.height / scale;
+  const cw = Math.round(r.width * DPR), ch = Math.round(r.height * DPR);
+  if (cv.width !== cw || cv.height !== ch){ cv.width = cw; cv.height = ch; }
+  GEO = computeGeo(); PAL = readPalette();
+  if (R3.ok){ R3.renderer.setPixelRatio(DPR); R3.renderer.setSize(r.width, r.height, false); }
+}
+let fitTimer = 0;
+const refit = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fit, 140); };
+window.addEventListener('resize', refit); window.addEventListener('orientationchange', refit);
+setInterval(fit, 800);
+document.addEventListener('visibilitychange', () => { G.paused = document.hidden; log('event', G.paused ? 'pause' : 'resume'); });
+
+// --- рендер: всё в canvas, цвета из CSS-переменных (§9) ---
+function css(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function readPalette(){
+  const p = {};
+  for (const k of ['wall', 'grout', 'tub', 'tub-shade', 'water', 'water-hi', 'foam', 'bubble', 'bubble-hard', 'rim', 'rim-hard', 'cup', 'cup-rim', 'slot',
+    'outline', 'beak', 'belly', 'white', 'danger', 'accent', 'ink']) p[k] = css('--' + k);
+  p.toys = [0, 1, 2, 3, 4, 5].map(i => css('--toy' + i));
+  return p;
+}
+const lerp = (a, b, p) => a + (b - a) * p;
+const easeOut = (p) => 1 - (1 - p) * (1 - p);
+const easeIn = (p) => p * p;
+
+function render(){
+  const t = now();
+  if (!PAL || !GEO) fit();
+  ctx.setTransform(DPR * scale, 0, 0, DPR * scale, 0, 0);
+  if (R3.ok) ctx.clearRect(0, 0, W, H); else drawBathroom(ctx);
+  // какой кадр хода показываем
+  let A = null, B = null, p = 1;
+  if (G.s && G.anim){
+    const a = G.anim;
+    while (a.k + 1 < a.frames.length && t >= a.starts[a.k + 1]){ a.k++; fireEvents(a.frames[a.k], a.frames[a.k - 1]); }
+    if (t >= a.end){ G.anim = null; log('fx.end', 'move'); }
+    else { A = a.frames[a.k - 1]; B = a.frames[a.k]; p = Math.min(1, (t - a.starts[a.k]) / (B.dur / G.timeScale)); }
+  }
+  if (G.s && !B){ A = B = { cols: G.s.cols, cup: G.s.cup, cap: G.s.cap, air: null, ev: G.s.lost && G.s.overId ? [{ t: 'overflow', id: G.s.overId }] : [] }; }
+  const view = B ? buildView(A, B, p, t) : null;
+  if (R3.ok) draw3D(view, t); else if (view) draw2D(view, t);
+  if (view) for (const b of view.bubbles) if (b.hard) drawHardBadge(ctx, b.x + b.r * 0.66, b.y - b.r * 0.66, b.r);
+  G.fx = G.fx.filter(f => f.until > t);
+  for (const f of G.fx) if (!R3.ok || f.type === 'text') drawFx(ctx, f, t);
+  if (!G.s) return;
+  // подсказка-палец на обучающих уровнях
+  if (G.hintMove >= 0 && !G.anim){
+    const c = G.hintMove >> 4, i = G.hintMove & 15;
+    if (G.s.cols[c] && G.s.cols[c][i]){ const q = bubbleXY(c, i); drawFinger(ctx, q.x + GEO.r * 0.78, q.y + GEO.r * 0.72, t); }
+  }
+  if (G.ending && t >= G.ending && !G.anim) finishEnding();
+  if (toastUntil && t > toastUntil){ $('toast').classList.add('hide'); toastUntil = 0; }
+}
+// Срез кадра для отрисовки: позиции пузырей и игрушек между двумя снимками хода, «желе» и сплющивание по времени.
+function buildView(A, B, p, t){
+  const LA = A === B ? null : layoutFrame(A), LB = layoutFrame(B);
+  const pos = (id, ease) => { const b = LB.get(id), a = LA && LA.get(id) || b, e = ease(p); return { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), s: lerp(a.s, b.s, e), z: lerp(a.z || 0, b.z || 0, e) }; };
+  const jelly = (t0) => { if (t0 === undefined || t < t0) return 0; const q = (t - t0) / CFG.JELLY_MS; return q >= 1 ? 0 : Math.sin(q * Math.PI * 3) * (1 - q); };
+  const bubbles = [];
+  B.cols.forEach(col => col.forEach(b => {
+    const q = pos(b.id, easeOut), w = jelly(G.wob[b.id]);
+    if (G.wob[b.id] !== undefined && t > G.wob[b.id] + CFG.JELLY_MS) delete G.wob[b.id];
+    const press = G.press && G.press.id === b.id ? Math.min(1, (t - G.press.t) / 90) : 0;
+    bubbles.push({ id: b.id, hard: b.hard, x: q.x, y: q.y, r: q.s * (1 - 0.08 * press), jelly: w });
+  }));
+  const air = new Set(B.air ? B.air.toys.map(x => x.id) : []);
+  const toys = [];
+  const addToy = (toy) => { const q = pos(toy.id, easeIn); const lb = LB.get(toy.id); toys.push({ id: toy.id, k: toy.k, x: q.x, y: q.y, s: q.s, z: q.z, cup: !!lb.cup && p >= 1 || (!!lb.cup && LA && LA.get(toy.id) && LA.get(toy.id).cup), over: !!lb.over, air: air.has(toy.id) || (LA && LA.get(toy.id) && LA.get(toy.id).x !== lb.x), squash: jelly(G.squash[toy.id]) }); };
+  B.cols.forEach(col => col.forEach(b => b.toys.forEach(addToy)));
+  if (B.air) B.air.toys.forEach(addToy);
+  B.cup.forEach(addToy);
+  let shake = 0; for (const f of G.fx) if (f.type === 'shake' && t < f.until) shake = Math.max(shake, f.amp * (1 - (t - f.t0) / (f.until - f.t0)));
+  return { bubbles, toys, cup: { n: B.cup.length, cap: B.cap }, shake };
+}
+// 2D-запасной рендер (нет WebGL): те же данные, плоские фигуры.
+function draw2D(v, t){
+  const sh = Math.sin(t * 0.06) * v.shake;
+  drawCup(ctx, W / 2 + sh, GEO.cupY, cupSlots(v.cup.n, v.cup.cap), v.cup.cap, v.cup.n >= v.cup.cap, v.cup.n > v.cup.cap);
+  for (const q of v.bubbles) drawBubbleBack(ctx, q.x, q.y, q.r * (1 + 0.06 * q.jelly), q.hard);
+  for (const q of v.toys) drawToy(ctx, q.k, q.x, q.y, q.s * (1 + 0.15 * q.squash));
+  for (const q of v.bubbles) drawBubbleFront(ctx, q.x, q.y, q.r * (1 + 0.06 * q.jelly), q.hard);
+}
+
+// ---------------------------------------------------------------------------
+// 3D-слой (three.js 0.185.1). Камера смотрит в лоб: плоскость z = 0 проецируется ровно в виртуальную 2D-раскладку,
+// поэтому ядро, попадание тапа и подписи остаются в виртуальных координатах, а W3() переводит точку на любой глубине
+// так, чтобы на экране она осталась на месте. Игрушки — GLB из Tripo (assets/models/<вид>.glb, конвейер GPT → Tripo),
+// пузыри — шейдер с радужной плёнкой, стена, ванна, вода, пена и мыльница-стаканчик — геометрия кодом.
+// ---------------------------------------------------------------------------
+async function loadGLB(url){
+  const res = await fetch(url); if (!res.ok) throw new Error('нет файла ' + url);
+  const buf = await res.arrayBuffer(), dv = new DataView(buf);
+  if (dv.getUint32(0, true) !== 0x46546C67) throw new Error('не GLB: ' + url);
+  let off = 12, json = null, bin = null;
+  while (off < buf.byteLength){
+    const len = dv.getUint32(off, true), typ = dv.getUint32(off + 4, true); off += 8;
+    if (typ === 0x4E4F534A) json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, off, len)));
+    else if (typ === 0x004E4942) bin = buf.slice(off, off + len);
+    off += len;
+  }
+  const CT = { 5120: Int8Array, 5121: Uint8Array, 5122: Int16Array, 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array }, NC = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
+  const acc = (i) => {
+    const a = json.accessors[i], bv = json.bufferViews[a.bufferView], T = CT[a.componentType], n = NC[a.type];
+    const start = (bv.byteOffset || 0) + (a.byteOffset || 0), stride = bv.byteStride;
+    if (!stride || stride === n * T.BYTES_PER_ELEMENT) return { arr: new T(bin, start, a.count * n), n };
+    const out = new T(a.count * n), src = new T(bin, bv.byteOffset || 0, ((bv.byteLength) / T.BYTES_PER_ELEMENT) | 0), st = stride / T.BYTES_PER_ELEMENT, o0 = (a.byteOffset || 0) / T.BYTES_PER_ELEMENT;
+    for (let k = 0; k < a.count; k++) for (let c = 0; c < n; c++) out[k * n + c] = src[o0 + k * st + c];
+    return { arr: out, n };
+  };
+  const texCache = {};
+  const tex = async (ti, srgb) => {
+    if (texCache[ti]) return texCache[ti];
+    const im = json.images[json.textures[ti].source], bv = json.bufferViews[im.bufferView];
+    const blob = new Blob([new Uint8Array(bin, bv.byteOffset || 0, bv.byteLength)], { type: im.mimeType || 'image/png' });
+    const bmp = await createImageBitmap(blob, { imageOrientation: 'none' });
+    const t = new THREE.CanvasTexture(bmp); t.flipY = false; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4;
+    return (texCache[ti] = t);
+  };
+  const mats = [];
+  for (const m of (json.materials || [{}])){                 // PBR как в Tripo: цвет, нормали, шероховатость/металл (ORM)
+    const pbr = m.pbrMetallicRoughness || {}, f = pbr.baseColorFactor || [1, 1, 1, 1];
+    const opt = { color: new THREE.Color(f[0], f[1], f[2]), roughness: pbr.roughnessFactor !== undefined ? pbr.roughnessFactor : 1, metalness: pbr.metallicFactor !== undefined ? pbr.metallicFactor : 1, envMapIntensity: 0.9 };
+    if (pbr.baseColorTexture) opt.map = await tex(pbr.baseColorTexture.index, true);
+    if (pbr.metallicRoughnessTexture){ const orm = await tex(pbr.metallicRoughnessTexture.index, false); opt.roughnessMap = orm; opt.metalnessMap = orm; }
+    if (m.normalTexture) opt.normalMap = await tex(m.normalTexture.index, false);
+    if (f[3] < 1){ opt.transparent = true; opt.opacity = f[3]; }
+    mats.push(new THREE.MeshStandardMaterial(opt));
+  }
+  const jointSet = new Set(); for (const s of (json.skins || [])) for (const j of s.joints) jointSet.add(j);
+  const toFloat = (a) => { if (a.arr instanceof Float32Array) return a.arr; const d = a.arr instanceof Uint8Array ? 255 : a.arr instanceof Uint16Array ? 65535 : a.arr instanceof Int8Array ? 127 : a.arr instanceof Int16Array ? 32767 : 1; return Float32Array.from(a.arr, (x) => Math.max(-1, x / d)); };
+  const buildMesh = (mi, skinned) => {
+    const grp = new THREE.Group();
+    for (const pr of json.meshes[mi].primitives){
+      const geo = new THREE.BufferGeometry(), at_ = pr.attributes;
+      geo.setAttribute('position', new THREE.BufferAttribute(toFloat(acc(at_.POSITION)), 3));
+      if (at_.NORMAL) geo.setAttribute('normal', new THREE.BufferAttribute(toFloat(acc(at_.NORMAL)), 3));
+      if (at_.TEXCOORD_0) geo.setAttribute('uv', new THREE.BufferAttribute(toFloat(acc(at_.TEXCOORD_0)), 2));
+      if (pr.indices !== undefined){ const ix = acc(pr.indices); geo.setIndex(new THREE.BufferAttribute(ix.arr, 1)); }
+      if (!at_.NORMAL) geo.computeVertexNormals();
+      let mesh;
+      if (skinned && at_.JOINTS_0 !== undefined){
+        const j = acc(at_.JOINTS_0); geo.setAttribute('skinIndex', new THREE.BufferAttribute(Uint16Array.from(j.arr), 4));
+        geo.setAttribute('skinWeight', new THREE.BufferAttribute(toFloat(acc(at_.WEIGHTS_0)), 4));
+        mesh = new THREE.SkinnedMesh(geo, mats[pr.material || 0] || mats[0]); mesh.frustumCulled = false;
+      } else mesh = new THREE.Mesh(geo, mats[pr.material || 0] || mats[0]);
+      mesh.castShadow = true; mesh.receiveShadow = true; grp.add(mesh);
+    }
+    return grp;
+  };
+  // узлы: сначала объекты (суставы — Bone), потом иерархия; имена — как у three (для клипов)
+  const objs = json.nodes.map((nd, i) => {
+    const o = nd.mesh !== undefined ? buildMesh(nd.mesh, nd.skin !== undefined) : jointSet.has(i) ? new THREE.Bone() : new THREE.Group();
+    o.name = THREE.PropertyBinding.sanitizeNodeName(nd.name || ('node_' + i));
+    if (nd.matrix) new THREE.Matrix4().fromArray(nd.matrix).decompose(o.position, o.quaternion, o.scale);
+    if (nd.translation) o.position.fromArray(nd.translation);
+    if (nd.rotation) o.quaternion.fromArray(nd.rotation);
+    if (nd.scale) o.scale.fromArray(nd.scale);
+    return o;
+  });
+  json.nodes.forEach((nd, i) => { for (const c of (nd.children || [])) objs[i].add(objs[c]); });
+  const sc = json.scenes[json.scene || 0], root = new THREE.Group(); root.userData.glbRoot = true;
+  for (const n of sc.nodes) root.add(objs[n]);
+  root.updateMatrixWorld(true);
+  json.nodes.forEach((nd, i) => {
+    if (nd.skin === undefined) return;
+    const sk = json.skins[nd.skin], bones = sk.joints.map((jj) => objs[jj]), ibm = sk.inverseBindMatrices !== undefined ? toFloat(acc(sk.inverseBindMatrices)) : null;
+    const inv = bones.map((bb, k) => (ibm ? new THREE.Matrix4().fromArray(ibm, k * 16) : new THREE.Matrix4()));
+    objs[i].traverse((m) => { if (m.isSkinnedMesh) m.bind(new THREE.Skeleton(bones, inv), new THREE.Matrix4()); });   // glTF: матрица узла сетки к скину не применяется
+  });
+  root.animations = (json.animations || []).map((an, ai) => {
+    const tracks = [];
+    for (const ch of an.channels){
+      const smp = an.samplers[ch.sampler], node = objs[ch.target.node]; if (!node) continue;
+      const times = toFloat(acc(smp.input)), out = acc(smp.output); let vals = toFloat(out); const n = out.n;
+      if (smp.interpolation === 'CUBICSPLINE'){ const v2 = new Float32Array(times.length * n); for (let k = 0; k < times.length; k++) for (let c = 0; c < n; c++) v2[k * n + c] = vals[k * n * 3 + n + c]; vals = v2; }
+      const interp = smp.interpolation === 'STEP' ? THREE.InterpolateDiscrete : THREE.InterpolateLinear;
+      if (ch.target.path === 'rotation') tracks.push(new THREE.QuaternionKeyframeTrack(node.name + '.quaternion', times, vals, interp));
+      else if (ch.target.path === 'translation') tracks.push(new THREE.VectorKeyframeTrack(node.name + '.position', times, vals, interp));
+      else if (ch.target.path === 'scale') tracks.push(new THREE.VectorKeyframeTrack(node.name + '.scale', times, vals, interp));
+    }
+    return new THREE.AnimationClip(an.name || ('anim_' + ai), -1, tracks);
+  });
+  return root;
+}
+
+const TOY_FILES = ['duck', 'whale', 'fish', 'frog', 'boat', 'star'];   // порядок = виды ядра (KIND_NAMES)
+const V3 = {
+  U: 1 / 40,          // мировых единиц на виртуальный пиксель
+  D: 30,              // расстояние от камеры до плоскости пузырей
+  CUP_Z: 1.9,         // глубина стаканчика (перед стенкой ванны)
+  TUB_Z: 1.0,         // задняя грань передней стенки ванны
+  WALL_Z: -5,         // стена в плитку
+  TOY_FIT: 2.7,       // размер игрушки = TOY_FIT × половинный размер из раскладки
+  DROPS: 240, SPARKS: 180, CONFETTI: 160, RINGS: 10,
+};
+const R3 = { ok: false, models: [], toyObj: new Map(), bubObj: new Map(), flyers: [], pops: [], cy: 0, foamKey: '', cupKey: '' };
+function W3(x, y, z){
+  const U = V3.U, k = (V3.D - z) / V3.D;
+  return [(x - W / 2) * U * k, R3.cy + ((GEO.waterY - y) * U - R3.cy) * k, z];
+}
+function init3D(){
+  try {
+    if (!window.THREE) return;
+    const T = THREE, gl = $('gl');
+    const renderer = new T.WebGLRenderer({ canvas: gl, antialias: true, powerPreference: 'high-performance' });
+    renderer.outputColorSpace = T.SRGBColorSpace; renderer.toneMapping = T.NeutralToneMapping; renderer.toneMappingExposure = 1.0;
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFShadowMap;
+    const scene = new T.Scene(), camera = new T.PerspectiveCamera(30, 1, 0.5, 120);
+    // окружение для бликов на резине: тёплая градиентная сфера и два софтбокса
+    const pm = new T.PMREMGenerator(renderer), env = new T.Scene(), sg = new T.SphereGeometry(20, 32, 16), cols = [];
+    const c0 = new T.Color(0xf4e2cf), c1 = new T.Color(0xdff3ff);
+    for (let i = 0; i < sg.attributes.position.count; i++){ const c = new T.Color().lerpColors(c0, c1, (sg.attributes.position.getY(i) / 20 + 1) / 2); cols.push(c.r, c.g, c.b); }
+    sg.setAttribute('color', new T.Float32BufferAttribute(cols, 3));
+    env.add(new T.Mesh(sg, new T.MeshBasicMaterial({ vertexColors: true, side: T.BackSide })));
+    const soft = (x, y, z, w, h, i) => { const m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: new T.Color(i, i, i), side: T.DoubleSide })); m.position.set(x, y, z); m.lookAt(0, 0, 0); env.add(m); };
+    soft(-8, 10, 9, 10, 6, 7); soft(11, 3, 6, 5, 9, 2.5);
+    scene.environment = pm.fromScene(env, 0.02).texture;
+    scene.add(new T.HemisphereLight(0xffffff, 0x7fb0bd, 0.7));
+    const fill = new T.DirectionalLight(0xdff6ff, 0.9); fill.position.set(9, 4, 12); scene.add(fill);   // заполняющий ~0,4 от ключевого
+    const key = new T.DirectionalLight(0xfff1e0, 2.1); key.position.set(-7, 14, 16); key.castShadow = true;
+    Object.assign(key.shadow.camera, { left: -10, right: 10, top: 16, bottom: -10, near: 1, far: 60 });
+    key.shadow.mapSize.set(1024, 1024); key.shadow.bias = -0.0006; key.shadow.normalBias = 0.02; key.shadow.radius = 5;
+    key.target.position.set(0, 3, 0); scene.add(key, key.target);
+    Object.assign(R3, { T, renderer, scene, camera, key });
+    buildBath(); buildBubbleMats(); buildParticles();
+    for (let k = 0; k < TOY_FILES.length; k++) R3.models[k] = fallbackToy(k);
+    R3.ok = true;
+    loadToys();
+    log('event', 'r3.init', 'three=' + T.REVISION);
+  } catch (e) { console.warn('3D недоступно, рисуем 2D', e); R3.ok = false; }
+}
+// Стена (текстура-канвас: тёмная бирюза, крупная плитка, боке, виньетка), ванна в три слоя, вода, пена, мыльница.
+// Палитра — по аудиту v0.2 (свой + GPT): тёмный спокойный фон, белый — только игровым объектам и бортику.
+const SCENE_PAL = {
+  wallTop: '#2a5f6b', wallBot: '#4f8f97', grout: 'rgba(10,40,48,.16)', tileHi: 'rgba(255,255,255,.05)',
+  tubPanel: 0xdce9e6, tubRim: 0xfff3de, water: 0x4fa3b8, foam: 0xf3faf7,
+  cup: 0x64c7b2, socket: 0x356a70, socketRim: 0xb5f1de, warn: 0xff7869,
+};
+function paintWall(){
+  const c = document.createElement('canvas'); c.width = 512; c.height = 1024; const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, 0, 1024); gr.addColorStop(0, SCENE_PAL.wallTop); gr.addColorStop(1, SCENE_PAL.wallBot);
+  g.fillStyle = gr; g.fillRect(0, 0, 512, 1024);
+  const tile = 512 / 4.4;                                    // ~4–5 плиток на ширину экрана, швы еле заметны
+  g.strokeStyle = SCENE_PAL.grout; g.lineWidth = 3;
+  for (let x = tile * 0.4; x < 512; x += tile){ g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 1024); g.stroke(); }
+  for (let y = 1024 - tile * 0.3; y > 0; y -= tile){ g.beginPath(); g.moveTo(0, y); g.lineTo(512, y); g.stroke(); }
+  const rnd = mulberry32(5);                                 // боке: мягкие световые пятна
+  for (let i = 0; i < 9; i++){
+    const x = rnd() * 512, y = rnd() * 640, r = 30 + rnd() * 70, rg = g.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, 'rgba(210,255,250,' + (0.07 + rnd() * 0.08) + ')'); rg.addColorStop(1, 'rgba(210,255,250,0)');
+    g.fillStyle = rg; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  const lg = g.createRadialGradient(150, 220, 20, 150, 220, 520);  // широкий световой градиент слева сверху
+  lg.addColorStop(0, 'rgba(255,255,240,.10)'); lg.addColorStop(1, 'rgba(255,255,240,0)'); g.fillStyle = lg; g.fillRect(0, 0, 512, 1024);
+  const vg = g.createRadialGradient(256, 560, 260, 256, 560, 720); // виньетка
+  vg.addColorStop(0, 'rgba(0,20,28,0)'); vg.addColorStop(1, 'rgba(0,20,28,.45)'); g.fillStyle = vg; g.fillRect(0, 0, 512, 1024);
+  return c;
+}
+function buildBath(){
+  const T = R3.T, S = R3.scene;
+  const tex = new T.CanvasTexture(paintWall()); tex.colorSpace = T.SRGBColorSpace;
+  R3.wall = new T.Mesh(new T.PlaneGeometry(1, 1), new T.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  R3.wall.position.z = V3.WALL_Z; S.add(R3.wall);           // размер под экран — в draw3D
+  // передняя панель ванны и кремовый глянцевый бортик сверху; тень под бортиком
+  const sh = new T.Shape(), w = 30, top = -0.3, bot = -40, rr = 0.6;
+  sh.moveTo(-w, bot); sh.lineTo(w, bot); sh.lineTo(w, top - rr); sh.quadraticCurveTo(w, top, w - rr, top); sh.lineTo(-w + rr, top); sh.quadraticCurveTo(-w, top, -w, top - rr); sh.closePath();
+  const tub = new T.Mesh(new T.ExtrudeGeometry(sh, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.28, bevelSize: 0.28, bevelSegments: 5, curveSegments: 8 }),
+    new T.MeshPhysicalMaterial({ color: SCENE_PAL.tubPanel, roughness: 0.3, clearcoat: 0.6, clearcoatRoughness: 0.2 }));
+  tub.position.z = V3.TUB_Z; tub.receiveShadow = true; S.add(tub);
+  const rim = new T.Mesh(new T.CylinderGeometry(0.34, 0.34, 60, 24), new T.MeshPhysicalMaterial({ color: SCENE_PAL.tubRim, roughness: 0.18, clearcoat: 1, clearcoatRoughness: 0.08 }));
+  rim.rotation.z = Math.PI / 2; rim.position.set(0, 0.02, V3.TUB_Z + 0.55); rim.receiveShadow = true; S.add(rim);
+  const sc = document.createElement('canvas'); sc.width = 4; sc.height = 64; const sg = sc.getContext('2d'), sgr = sg.createLinearGradient(0, 0, 0, 64);
+  sgr.addColorStop(0, 'rgba(65,109,120,.32)'); sgr.addColorStop(1, 'rgba(65,109,120,0)'); sg.fillStyle = sgr; sg.fillRect(0, 0, 4, 64);
+  const shadow = new T.Mesh(new T.PlaneGeometry(60, 0.9), new T.MeshBasicMaterial({ map: new T.CanvasTexture(sc), transparent: true, depthWrite: false }));
+  shadow.position.set(0, -0.72, V3.TUB_Z + 0.79); S.add(shadow);
+  // вода (внутренняя часть ванны) с пологими волнами по абсолютному времени
+  const wg = new T.PlaneGeometry(40, V3.TUB_Z - V3.WALL_Z, 70, 10); wg.rotateX(-Math.PI / 2);
+  const water = new T.Mesh(wg, new T.MeshPhysicalMaterial({ color: SCENE_PAL.water, roughness: 0.06, clearcoat: 1, transparent: true, opacity: 0.95 }));
+  water.position.set(0, -0.1, (V3.TUB_Z + V3.WALL_Z) / 2); S.add(water);
+  R3.water = water; R3.waterBase = Float32Array.from(wg.attributes.position.array);
+  // пена: за полем и по краям (не закрывает нижние пузыри и путь в мыльницу)
+  R3.foam = new T.InstancedMesh(new T.SphereGeometry(1, 18, 12), new T.MeshStandardMaterial({ color: SCENE_PAL.foam, roughness: 0.55 }), 140);
+  R3.foam.count = 0; S.add(R3.foam);
+  R3.cupMat = new T.MeshPhysicalMaterial({ color: SCENE_PAL.cup, roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.15, emissive: new T.Color(SCENE_PAL.warn), emissiveIntensity: 0 });
+  R3.sockMat = new T.MeshStandardMaterial({ color: SCENE_PAL.socket, roughness: 0.7 });
+  R3.sockRim = new T.MeshPhysicalMaterial({ color: SCENE_PAL.socketRim, roughness: 0.25, clearcoat: 1 });
+  R3.sockWarn = new T.MeshPhysicalMaterial({ color: SCENE_PAL.warn, emissive: SCENE_PAL.warn, emissiveIntensity: 0.4, roughness: 0.3 });
+  R3.cup = new T.Group(); S.add(R3.cup);
+}
+// Пена (детерминированно от номера уровня): облака за плоскостью пузырей + кучки по краям экрана спереди.
+function layoutFoam(){
+  const rnd = mulberry32(31 + (G.s ? G.s.li : 0)), list = [];
+  for (let k = 0; k < 70; k++) list.push({ x: rnd() * W, z: -3.2 + rnd() * 2.3, s: 0.22 + rnd() * 0.4 });
+  for (let k = 0; k < 14; k++){ const left = k % 2 === 0; list.push({ x: left ? rnd() * W * 0.12 : W - rnd() * W * 0.12, z: -0.4 + rnd() * 1.2, s: 0.2 + rnd() * 0.3 }); }
+  R3.foamList = list; R3.foam.count = list.length;
+}
+// Мыльница-«таблетка» с гнёздами по числу мест; игрушка садится в своё гнездо.
+function layoutCup(cap){
+  const T = R3.T; R3.cup.clear();
+  const cs = cupSlots(0, cap), z = V3.CUP_Z, w = cs.w * V3.U * ((V3.D - z) / V3.D), h = GEO.cupH * 0.92 * V3.U * ((V3.D - z) / V3.D);
+  const sh = new T.Shape(), r = h / 2, x0 = -w / 2 + r, x1 = w / 2 - r;
+  sh.moveTo(x0, -r); sh.lineTo(x1, -r); sh.absarc(x1, 0, r, -Math.PI / 2, Math.PI / 2, false); sh.lineTo(x0, r); sh.absarc(x0, 0, r, Math.PI / 2, Math.PI * 1.5, false);
+  const body = new T.Mesh(new T.ExtrudeGeometry(sh, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.22, bevelSize: 0.2, bevelSegments: 5, curveSegments: 24 }), R3.cupMat);
+  const [cx, cy] = W3(W / 2, cs.y, z);
+  body.position.set(cx, cy, z - 0.3); body.castShadow = true; body.receiveShadow = true; R3.cup.add(body);   // передняя грань ≈ CUP_Z + 0.42, перед панелью ванны
+  R3.sockets = [];
+  const sr = cs.sw * 0.4 * V3.U * ((V3.D - z) / V3.D);
+  const disc = new T.CircleGeometry(sr, 40), ring = new T.TorusGeometry(sr, sr * 0.1, 10, 48);
+  for (let i = 0; i < cap; i++){
+    const [px, py] = W3(cs.x(i), cs.y, z);
+    const d = new T.Mesh(disc, R3.sockMat); d.position.set(px, py, z + 0.44); R3.cup.add(d);
+    const rg = new T.Mesh(ring, R3.sockRim); rg.position.set(px, py, z + 0.46); R3.cup.add(rg); R3.sockets.push(rg);
+  }
+}
+// Пузырь: шейдер — прозрачная середина, кромка по Френелю, радужная тонкая плёнка, два блика.
+// Двойной (uHard) — плотнее, с белой полосой второй плёнки по краю (отличие формой, не только цветом).
+function buildBubbleMats(){
+  const T = R3.T;
+  // Пузырь (по аудиту): середина почти прозрачна, чёткая белая кромка ~6% радиуса, белая дуга-блик сверху слева,
+  // тёмный рефлекс снизу, радуга пятнами у края. ρ — доля радиуса от центра в проекции (не 1 − N·V: тот сжат у края).
+  // Двойной: второй контур внутри с зазором + лёгкая матовость только у края; значок «2» — в canvas-оверлее.
+  const vs = `varying vec3 vN; varying vec3 vV; varying vec3 vNv; varying vec3 vLp;
+    void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vN = normalize(mat3(modelMatrix) * normal); vNv = normalize(normalMatrix * normal);
+      vLp = position; vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }`;
+  const fs = `uniform float uTime; uniform float uHard; uniform float uAlpha; varying vec3 vN; varying vec3 vV; varying vec3 vNv; varying vec3 vLp;
+    void main(){
+      vec3 n = normalize(vN), v = normalize(vV), nv = normalize(vNv);
+      float ndv = max(dot(n, v), 0.0), rho = sqrt(max(0.0, 1.0 - ndv * ndv));
+      float pt = smoothstep(0.15, 0.85, 0.5 + 0.5 * sin(vLp.x * 3.1 + vLp.y * 2.3 - uTime * 0.5));
+      vec3 irid = 0.55 + 0.45 * cos(6.2831 * (vec3(0.0, 0.33, 0.67) + rho * 1.6 + vLp.y * 0.35 + uTime * 0.08));
+      vec3 col = mix(vec3(0.96, 1.0, 1.0), irid, 0.7 * pt * smoothstep(0.55, 0.92, rho));
+      float a = 0.025 + pow(rho, 6.0) * 0.45 * (0.5 + 0.5 * pt);
+      float rim = smoothstep(0.925, 0.965, rho);
+      col = mix(col, vec3(0.94, 1.0, 1.0), rim * 0.85); a = max(a, rim * 0.75);
+      vec2 d2 = rho > 0.001 ? normalize(nv.xy) : vec2(0.0);
+      float arc = smoothstep(0.66, 0.74, rho) * (1.0 - smoothstep(0.84, 0.89, rho)) * smoothstep(0.55, 0.9, dot(d2, normalize(vec2(-0.6, 0.8))));
+      col = mix(col, vec3(1.0), arc); a = max(a, arc * 0.6);
+      float bot = smoothstep(0.7, 0.9, rho) * (1.0 - rim) * smoothstep(0.3, 0.9, -d2.y);
+      col = mix(col, vec3(0.204, 0.408, 0.467), bot * 0.75); a = max(a, bot * 0.45);
+      float sp = pow(max(dot(n, normalize(normalize(vec3(-0.45, 0.75, 0.5)) + v)), 0.0), 220.0) * 1.6;
+      if (uHard > 0.5){
+        float in2 = smoothstep(0.74, 0.77, rho) * (1.0 - smoothstep(0.80, 0.83, rho));
+        col = mix(col, vec3(1.0), in2); a = max(a, in2 * 0.9);
+        float frost = smoothstep(0.8, 0.9, rho) * (1.0 - rim);
+        col = mix(col, vec3(0.86, 0.95, 1.0), frost * 0.6); a = max(a, frost * 0.4);
+      }
+      gl_FragColor = vec4(col + sp, clamp((a + sp) * uAlpha, 0.0, 1.0));
+    }`;
+  const mk = (hard) => new T.ShaderMaterial({ vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uHard: { value: hard ? 1 : 0 }, uAlpha: { value: 1 } } });
+  R3.bubGeo = new T.SphereGeometry(1, 48, 32); R3.matBub = mk(false); R3.matHard = mk(true); R3.mkBubMat = mk;
+}
+// Частицы: брызги, искры, конфетти — пулы InstancedMesh; движение аналитическое от времени старта (абсолютное время).
+function buildParticles(){
+  const T = R3.T, S = R3.scene;
+  const pool = (geo, mat, n) => { const m = new T.InstancedMesh(geo, mat, n); m.frustumCulled = false; m.count = n; m.instanceMatrix.setUsage(T.DynamicDrawUsage);
+    const z = new T.Matrix4().makeScale(0, 0, 0); for (let i = 0; i < n; i++) m.setMatrixAt(i, z); S.add(m); return { m, n, list: [], next: 0 }; };
+  R3.drops = pool(new T.SphereGeometry(1, 10, 8), new T.MeshPhysicalMaterial({ color: 0xe8f7ff, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.85 }), V3.DROPS);
+  R3.sparks = pool(new T.OctahedronGeometry(1, 0), new T.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }), V3.SPARKS);
+  R3.conf = pool(new T.PlaneGeometry(1, 0.6), new T.MeshStandardMaterial({ color: 0xffffff, side: T.DoubleSide, roughness: 0.5 }), V3.CONFETTI);
+  const palette = [0xffd23f, 0x4a90e2, 0xff7f50, 0x5cc96b, 0xe84a5f, 0x9b6dde, 0xffffff];
+  for (let i = 0; i < V3.SPARKS; i++) R3.sparks.m.setColorAt(i, new T.Color(i % 3 ? 0xfff2a8 : 0xffffff));
+  for (let i = 0; i < V3.CONFETTI; i++) R3.conf.m.setColorAt(i, new T.Color(palette[i % palette.length]));
+  R3.rings = [];
+  for (let i = 0; i < V3.RINGS; i++){
+    const r = new T.Mesh(new T.RingGeometry(0.92, 1, 48), new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false }));
+    r.visible = false; S.add(r); R3.rings.push({ mesh: r, t0: 0, dur: 1 });
+  }
+}
+function emit(pool, o){ const i = pool.next; pool.next = (pool.next + 1) % pool.n; pool.list[i] = o; }
+// Брызги лопнувшего пузыря: капли летят наружу и падают.
+function spawnPop(x, y, r, chain){
+  if (!R3.ok) return;
+  const t = now(), rnd = mulberry32((t * 1000) | 0), [wx, wy] = W3(x, y, 0), wr = r * V3.U, n = 16 + chain * 6;
+  for (let i = 0; i < n; i++){
+    const a = rnd() * Math.PI * 2, el = (rnd() - 0.5) * 1.2, sp = 2.5 + rnd() * 3 + chain;
+    const dir = [Math.cos(a) * Math.cos(el), Math.sin(a) * Math.cos(el), Math.sin(el)];
+    emit(R3.drops, { t0: t, life: 450 + rnd() * 350, p: [wx + dir[0] * wr, wy + dir[1] * wr, dir[2] * wr], v: [dir[0] * sp, dir[1] * sp + 2, dir[2] * sp], g: -14, s0: 0.05 + rnd() * 0.07, s1: 0.01 });
+  }
+  const ring = R3.rings.find(q => !q.mesh.visible) || R3.rings[0];
+  ring.mesh.visible = true; ring.mesh.position.set(wx, wy, 0.2); ring.t0 = t; ring.dur = 320; ring.r0 = wr; ring.r1 = wr * (1.55 + chain * 0.15);
+}
+// Искры (тройка, улёт, победа).
+function spawnSparks(x, y, z, n, spread){
+  if (!R3.ok) return;
+  const t = now(), rnd = mulberry32((t * 997) | 0), [wx, wy, wz] = W3(x, y, z);
+  for (let i = 0; i < n; i++){
+    const a = rnd() * Math.PI * 2, sp = (1.5 + rnd() * 3) * (spread || 1);
+    emit(R3.sparks, { t0: t, life: 500 + rnd() * 400, p: [wx, wy, wz + 0.5], v: [Math.cos(a) * sp, Math.sin(a) * sp + 1, (rnd() - 0.3) * 2], g: -3, s0: 0.11 + rnd() * 0.08, s1: 0, spin: rnd() * 10 });
+  }
+}
+function spawnConfetti(n){
+  if (!R3.ok) return;
+  const t = now(), rnd = mulberry32((t * 991) | 0);
+  for (let i = 0; i < n; i++){
+    const [wx, wy] = W3(W * (0.15 + rnd() * 0.7), H * (0.35 + rnd() * 0.2), 2);
+    emit(R3.conf, { t0: t + rnd() * 250, life: 1600 + rnd() * 900, p: [wx, wy, 2 + rnd() * 2], v: [(rnd() - 0.5) * 7, 4 + rnd() * 6, (rnd() - 0.5) * 3], g: -9, s0: 0.42, s1: 0.32, spin: 4 + rnd() * 8, drag: 0.6 });
+  }
+}
+// Тройка улетает: копия пузыря с тремя игрушками всплывает, крутится и лопается искрами наверху.
+function spawnFlyer(x, y, r, k){
+  if (!R3.ok) return;
+  const T = R3.T, grp = new T.Group(), mat = R3.mkBubMat(false), bub = new T.Mesh(R3.bubGeo, mat);
+  bub.renderOrder = 10; grp.add(bub);
+  const toys = [];
+  for (const o of SLOT_OFS[3]){ const m = R3.models[k].clone(); m.position.set(o[0], -o[1], 0); m.scale.setScalar(TOY_BY_N[3] * V3.TOY_FIT); grp.add(m); toys.push(m); }
+  R3.scene.add(grp); R3.flyers.push({ grp, mat, toys, t0: now(), dur: 720 / G.timeScale, x, y, r });
+}
+// Игрушка исчезает с хлопком (тройка в стаканчике, тройка на лету).
+function spawnToyPop(x, y, z, s, k, tx, ty){
+  if (!R3.ok) return;
+  const m = R3.models[k].clone(); R3.scene.add(m);
+  R3.pops.push({ m, t0: now(), dur: 460 / G.timeScale, x, y, z, s, tx: tx ?? x, ty: ty ?? y });
+}
+function updatePool(pool, t, kind){
+  const T = R3.T, M = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), v = new T.Vector3(), sc = new T.Vector3();
+  for (let i = 0; i < pool.n; i++){
+    const o = pool.list[i];
+    if (!o){ continue; }
+    const dt = (t - o.t0) / 1000;
+    if (dt < 0){ M.makeScale(0, 0, 0); pool.m.setMatrixAt(i, M); continue; }
+    const q01 = (t - o.t0) / o.life;
+    if (q01 >= 1){ pool.list[i] = null; M.makeScale(0, 0, 0); pool.m.setMatrixAt(i, M); continue; }
+    const dr = o.drag ? (1 - Math.exp(-o.drag * dt)) / o.drag : dt;
+    v.set(o.p[0] + o.v[0] * dr, o.p[1] + o.v[1] * dr + 0.5 * o.g * dt * dt * (o.drag ? 0.35 : 1), o.p[2] + o.v[2] * dr);
+    const s = lerp(o.s0, o.s1, q01); sc.set(s, s, s);
+    e.set((o.spin || 0) * dt, (o.spin || 0) * dt * 0.7, 0); q.setFromEuler(e);
+    M.compose(v, q, sc); pool.m.setMatrixAt(i, M);
+  }
+  pool.m.instanceMatrix.needsUpdate = true;
+}
+// Запасная игрушка до загрузки GLB: шарик цвета вида.
+function fallbackToy(k){
+  const T = R3.T, g = new T.Group();
+  const m = new T.Mesh(new T.SphereGeometry(0.42, 24, 16), new T.MeshPhysicalMaterial({ color: new T.Color(PAL.toys[k]), roughness: 0.3, clearcoat: 1 }));
+  m.castShadow = true; g.add(m); return g;
+}
+// GLB игрушек: нормализуем — центр в нуле, наибольший размер = 1, лицом к камере (+z).
+async function loadToys(){
+  const T = R3.T; let n = 0;
+  await Promise.all(TOY_FILES.map(async (name, k) => {
+    try {
+      const root = await loadGLB('assets/models/' + name + '.glb');
+      const box = new T.Box3().setFromObject(root), size = box.getSize(new T.Vector3()), c = box.getCenter(new T.Vector3());
+      const piv = new T.Group(); root.position.sub(c); piv.add(root);
+      piv.scale.setScalar(1 / Math.max(size.x, size.y, size.z));
+      const wrap = new T.Group(); wrap.add(piv);
+      wrap.traverse(o => { if (o.isMesh){ o.castShadow = true; o.receiveShadow = false; if (o.material){ o.material.metalnessMap = null; o.material.metalness = 0; o.material.envMapIntensity = 0.5; o.material.roughness = 0.5; o.material.needsUpdate = true; } } });
+      R3.models[k] = wrap; n++;
+    } catch (e) { console.warn('нет модели ' + name, e.message); }
+  }));
+  for (const [id, o] of R3.toyObj){ R3.scene.remove(o); } R3.toyObj.clear();
+  warm3D();
+  log('event', 'r3.models', 'loaded=' + n + '/' + TOY_FILES.length);
+}
+// Прогрев: один раз нарисовать всё, что появится позже (игрушки всех видов, частицы, кольца) — иначе рывок в кадре первого появления.
+function warm3D(){
+  const T = R3.T, tmp = [];
+  R3.models.forEach((m, k) => { const c = m.clone(); c.position.set(k * 0.3 - 1, 2, 0); c.scale.setScalar(0.3); R3.scene.add(c); tmp.push(c); });
+  const fb = new T.Mesh(R3.bubGeo, R3.matHard); fb.position.set(1, 2, 0); fb.scale.setScalar(0.2); R3.scene.add(fb); tmp.push(fb);
+  for (const r of R3.rings){ r.mesh.visible = true; r.mesh.scale.setScalar(0.001); }
+  try { R3.renderer.compile(R3.scene, R3.camera); R3.renderer.render(R3.scene, R3.camera); } catch (e) {}
+  for (const o of tmp) R3.scene.remove(o);
+  for (const r of R3.rings) r.mesh.visible = false;
+}
+function draw3D(v, t){
+  const T = R3.T, cam = R3.camera, U = V3.U;
+  R3.cy = (GEO.waterY - H / 2) * U;
+  // камера: плоскость z = 0 ровно на экран; тряска — сдвиг камеры
+  const sh = v ? v.shake : 0, sx = Math.sin(t * 0.071) * sh * U, sy = Math.cos(t * 0.053) * sh * U;
+  cam.aspect = W / H; cam.fov = 2 * Math.atan((H * U / 2) / V3.D) * 180 / Math.PI; cam.updateProjectionMatrix();
+  cam.position.set(sx, R3.cy + sy, V3.D); cam.lookAt(sx, R3.cy + sy, 0);
+  // стена: плоскость ровно на весь экран на своей глубине
+  const kw = (V3.D - V3.WALL_Z) / V3.D; R3.wall.scale.set(W * U * kw * 1.04, H * U * kw * 1.04, 1); R3.wall.position.set(sx, R3.cy + sy, V3.WALL_Z);
+  // вода: пологие волны
+  const pa = R3.water.geometry.attributes.position, base = R3.waterBase;
+  for (let i = 0; i < pa.count; i++){ const x = base[i * 3], z = base[i * 3 + 2]; pa.array[i * 3 + 1] = Math.sin(x * 1.3 + t * 0.0021) * 0.05 + Math.sin(z * 2.1 - t * 0.0017 + x * 0.4) * 0.04; }
+  pa.needsUpdate = true; R3.water.geometry.computeVertexNormals();
+  // пена и мыльница — под уровень
+  const fk = (G.s ? G.s.li : -1) + ':' + W + ':' + Math.round(H);
+  if (R3.foamKey !== fk && G.s){ R3.foamKey = fk; layoutFoam(); }
+  if (R3.foamList){
+    const M = new T.Matrix4(), q = new T.Quaternion(), p = new T.Vector3(), s = new T.Vector3();
+    R3.foamList.forEach((f, i) => { const [x] = W3(f.x, GEO.waterY, f.z); const b = 1 + Math.sin(t * 0.002 + i * 1.7) * 0.08; p.set(x, -0.05 + f.s * 0.3, f.z); s.set(f.s * b, f.s * 0.8 * b, f.s * b); M.compose(p, q, s); R3.foam.setMatrixAt(i, M); });
+    R3.foam.instanceMatrix.needsUpdate = true;
+  }
+  if (v){
+    const ck = (G.s ? G.s.li : -1) + ':' + v.cup.cap + ':' + W + ':' + Math.round(H);
+    if (R3.cupKey !== ck){ R3.cupKey = ck; layoutCup(v.cup.cap); }
+    const danger = v.cup.n >= v.cup.cap, over = v.cup.n > v.cup.cap;
+    const last = v.cup.n >= v.cup.cap - 1 && v.cup.n > 0;      // осталось одно место или полон — ободки коралловые
+    R3.cupMat.emissiveIntensity = over ? 0.7 : danger ? 0.18 + 0.14 * Math.sin(t * 0.012) : 0;
+    R3.sockets.forEach((rg, i) => { rg.material = last && i >= v.cup.n ? R3.sockWarn : R3.sockRim; });   // коралловым — только свободное место
+    R3.sockWarn.emissiveIntensity = 0.3 + 0.25 * Math.sin(t * 0.012);
+    R3.cup.position.x = Math.sin(t * 0.09) * (v.shake > 6 ? v.shake : 0) * U;
+  }
+  // пузыри
+  R3.matBub.uniforms.uTime.value = R3.matHard.uniforms.uTime.value = t / 1000;
+  const seenB = new Set();
+  if (v) for (const b of v.bubbles){
+    let m = R3.bubObj.get(b.id);
+    if (!m){ m = new T.Mesh(R3.bubGeo, R3.matBub); m.renderOrder = 10; R3.scene.add(m); R3.bubObj.set(b.id, m); }
+    m.material = b.hard ? R3.matHard : R3.matBub;
+    const bob = Math.sin(t * 0.0016 + b.id * 1.7) * 1.4, [x, y] = W3(b.x, b.y + bob, 0), s = b.r * U;
+    m.position.set(x, y, 0); m.scale.set(s * (1 + 0.07 * b.jelly), s * (1 - 0.07 * b.jelly), s * (1 + 0.07 * b.jelly));
+    seenB.add(b.id);
+  }
+  for (const [id, m] of R3.bubObj) if (!seenB.has(id)){ R3.scene.remove(m); R3.bubObj.delete(id); }
+  // игрушки
+  const seenT = new Set();
+  if (v) for (const q of v.toys){
+    let o = R3.toyObj.get(q.id);
+    if (o && o.userData.k !== q.k){ R3.scene.remove(o); o = null; }          // id игрушек начинаются заново на каждом уровне — сверять вид
+    if (!o){ o = R3.models[q.k].clone(); o.userData.k = q.k; R3.scene.add(o); R3.toyObj.set(q.id, o); }
+    const still = q.cup && !q.air, shiver = q.over ? Math.sin(t * 0.06) * 3 : 0;
+    const bob = still ? 0 : Math.sin(t * 0.0016 + q.id * 0.9) * 1.2, [x, y, z] = W3(q.x + shiver, q.y + bob, q.z), s = q.s * U * V3.TOY_FIT * ((V3.D - q.z) / V3.D);
+    o.position.set(x, y, z + 0.05);
+    const sq = q.squash;
+    o.scale.set(s * (1 + 0.18 * sq), s * (1 - 0.22 * sq), s * (1 + 0.18 * sq));
+    o.rotation.set(0, still ? 0.3 : Math.sin(t * 0.0011 + q.id) * 0.45 + 0.25, q.air ? Math.sin(t * 0.02 + q.id) * 0.25 : 0);
+    seenT.add(q.id);
+  }
+  for (const [id, o] of R3.toyObj) if (!seenT.has(id)){ R3.scene.remove(o); R3.toyObj.delete(id); }
+  // эффекты: улетающие тройки, хлопки игрушек, кольца, частицы
+  R3.flyers = R3.flyers.filter(f => {
+    const q = (t - f.t0) / f.dur;
+    if (q >= 1){ R3.scene.remove(f.grp); spawnSparks(f.x, f.y - 150, 0, 22, 1.2); spawnPop(f.x, f.y - 150, f.r, 1); return false; }
+    const [x, y] = W3(f.x, f.y - 150 * easeIn(q), 0), s = f.r * U * (1 + 0.25 * Math.sin(q * Math.PI));
+    f.grp.position.set(x, y, 0.3); f.grp.scale.setScalar(s); f.grp.rotation.y = q * 4;
+    f.mat.uniforms.uTime.value = t / 1000; f.mat.uniforms.uAlpha.value = 1 - q * 0.4;
+    return true;
+  });
+  R3.pops = R3.pops.filter(p => {
+    const q = (t - p.t0) / p.dur;
+    if (q >= 1){ R3.scene.remove(p.m); return false; }
+    // 0–0,4: съезжается к цели; 0,4–0,6: вздувается; 0,6–1: лопается в ноль
+    const mv = easeOut(Math.min(1, q / 0.4)), px = lerp(p.x, p.tx, mv), py = lerp(p.y, p.ty, mv);
+    const k = q < 0.4 ? 1 : q < 0.6 ? 1 + (q - 0.4) / 0.2 * 0.35 : 1.35 * (1 - (q - 0.6) / 0.4);
+    const [x, y, z] = W3(px, py, p.z), s = p.s * U * V3.TOY_FIT * k;
+    p.m.position.set(x, y, z + 0.3); p.m.scale.setScalar(Math.max(0.0001, s)); p.m.rotation.y = 0.3 + (q > 0.4 ? (q - 0.4) * 8 : 0);
+    return true;
+  });
+  for (const r of R3.rings){ if (!r.mesh.visible) continue; const q = (t - r.t0) / r.dur; if (q >= 1){ r.mesh.visible = false; continue; } r.mesh.scale.setScalar(lerp(r.r0, r.r1, easeOut(q))); r.mesh.material.opacity = 0.9 * (1 - q); }
+  updatePool(R3.drops, t); updatePool(R3.sparks, t); updatePool(R3.conf, t);
+  R3.renderer.render(R3.scene, cam);
+}
+
+// Стена в плитку и ванна с водой и пеной (фон; от W, H, GEO.waterY).
+function drawBathroom(c){
+  c.fillStyle = PAL.wall; c.fillRect(0, 0, W, H);
+  c.strokeStyle = PAL.grout; c.lineWidth = 2;
+  for (let x = 20; x < W; x += 44){ c.beginPath(); c.moveTo(x, 0); c.lineTo(x, GEO.waterY); c.stroke(); }
+  for (let y = GEO.waterY - 10; y > 0; y -= 44){ c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+  const wy = GEO.waterY;
+  // вода
+  c.fillStyle = PAL.water; c.beginPath(); c.moveTo(0, wy + 4);
+  for (let x = 0; x <= W; x += 20) c.quadraticCurveTo(x + 10, wy - 3, x + 20, wy + 4);
+  c.lineTo(W, wy + 26); c.lineTo(0, wy + 26); c.closePath(); c.fill();
+  // корпус ванны
+  c.fillStyle = PAL.tub; c.beginPath(); c.roundRect(-10, wy + 18, W + 20, H - wy, 22); c.fill();
+  c.fillStyle = PAL['tub-shade']; c.fillRect(0, wy + 30, W, 4);
+  // пена у воды — статичные шапки под столбиками (без случайности по кадрам)
+  c.fillStyle = PAL.foam;
+  if (G.s) for (let k = 0; k < GEO.nc; k++){
+    const x = bubbleXY(k, 0).x, r = GEO.r;
+    for (const [dx, dr] of [[-0.8, 0.32], [-0.35, 0.42], [0.25, 0.4], [0.75, 0.3]]){ c.beginPath(); c.arc(x + dx * r, wy + 6, dr * r, 0, Math.PI * 2); c.fill(); }
+  }
+}
+// Пузырь: прозрачная заливка (рисуется до игрушек). Двойной — плотнее.
+function drawBubbleBack(c, x, y, r, hard){
+  c.fillStyle = hard ? PAL['bubble-hard'] : PAL.bubble;
+  c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+}
+// Пузырь: ободок и блик (поверх игрушек). Двойной — второй ободок с насечками (не только цвет, §9).
+function drawBubbleFront(c, x, y, r, hard){
+  c.lineWidth = r * 0.07; c.strokeStyle = hard ? PAL['rim-hard'] : PAL.rim;
+  c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.stroke();
+  if (hard){
+    c.lineWidth = r * 0.05; c.beginPath(); c.arc(x, y, r * 0.86, 0, Math.PI * 2); c.stroke();
+    c.lineWidth = r * 0.06;
+    for (let a = 0; a < 8; a++){ const ang = a * Math.PI / 4 + 0.2; c.beginPath(); c.moveTo(x + Math.cos(ang) * r * 0.86, y + Math.sin(ang) * r * 0.86); c.lineTo(x + Math.cos(ang) * r, y + Math.sin(ang) * r); c.stroke(); }
+  }
+  c.strokeStyle = PAL.white; c.lineWidth = r * 0.1; c.lineCap = 'round';
+  c.beginPath(); c.arc(x, y, r * 0.72, Math.PI * 1.08, Math.PI * 1.38); c.stroke();
+  c.fillStyle = PAL.white; c.beginPath(); c.arc(x - r * 0.18, y - r * 0.74, r * 0.06, 0, Math.PI * 2); c.fill();
+  c.lineCap = 'butt';
+}
+// Стаканчик под ванной: cap мест-кружков; полный — красный ободок, переполнен — красная заливка.
+function drawCup(c, cx, cy, cs, cap, danger, over){
+  const w = cs.w, h = GEO.cupH;
+  c.fillStyle = over ? PAL.danger : PAL.cup; c.strokeStyle = danger ? PAL.danger : PAL['cup-rim']; c.lineWidth = 4;
+  c.beginPath(); c.moveTo(cx - w / 2, cy - h / 2); c.lineTo(cx + w / 2, cy - h / 2); c.lineTo(cx + w / 2 - 10, cy + h / 2); c.lineTo(cx - w / 2 + 10, cy + h / 2); c.closePath();
+  c.fill(); c.stroke();
+  c.fillStyle = PAL.slot;
+  for (let i = 0; i < cap; i++){ c.beginPath(); c.arc(cs.x(i) + (cx - W / 2), cs.y, cs.s * 1.25, 0, Math.PI * 2); c.fill(); }
+}
+// Игрушки — плоские фигуры с обводкой; каждый вид отличается и формой, не только цветом (§9).
+function drawToy(c, k, x, y, s){
+  c.save(); c.translate(x, y); c.lineWidth = Math.max(1.4, s * 0.13); c.strokeStyle = PAL.outline; c.lineJoin = 'round';
+  const col = PAL.toys[k];
+  if (k === 0) drawDuck(c, s, col); else if (k === 1) drawWhale(c, s, col); else if (k === 2) drawFish(c, s, col);
+  else if (k === 3) drawFrog(c, s, col); else if (k === 4) drawBoat(c, s, col); else drawStar(c, s, col);
+  c.restore();
+}
+function eye(c, x, y, r){ c.fillStyle = PAL.outline; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); }
+function drawDuck(c, s, col){            // утёнок: тело, голова, клюв, крыло
+  c.fillStyle = col;
+  c.beginPath(); c.ellipse(-0.12 * s, 0.28 * s, 0.85 * s, 0.55 * s, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.beginPath(); c.arc(0.32 * s, -0.36 * s, 0.44 * s, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.fillStyle = PAL.beak; c.beginPath(); c.moveTo(0.68 * s, -0.42 * s); c.lineTo(1.05 * s, -0.28 * s); c.lineTo(0.68 * s, -0.14 * s); c.closePath(); c.fill(); c.stroke();
+  eye(c, 0.42 * s, -0.46 * s, 0.09 * s);
+  c.beginPath(); c.ellipse(-0.25 * s, 0.22 * s, 0.38 * s, 0.2 * s, -0.25, 0, Math.PI); c.stroke();
+}
+function drawWhale(c, s, col){           // кит: хвост, тело, светлое брюхо, фонтанчик
+  c.fillStyle = col;
+  c.beginPath(); c.moveTo(-0.6 * s, 0.15 * s); c.lineTo(-1.02 * s, -0.32 * s); c.lineTo(-0.9 * s, 0.1 * s); c.lineTo(-1.02 * s, 0.45 * s); c.closePath(); c.fill(); c.stroke();
+  c.beginPath(); c.ellipse(0.1 * s, 0.15 * s, 0.82 * s, 0.56 * s, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.fillStyle = PAL.belly; c.beginPath(); c.ellipse(0.18 * s, 0.44 * s, 0.52 * s, 0.17 * s, 0, 0, Math.PI * 2); c.fill();
+  eye(c, 0.52 * s, 0.02 * s, 0.09 * s);
+  c.strokeStyle = col; c.lineWidth = 0.14 * s; c.lineCap = 'round';
+  c.beginPath(); c.moveTo(0.1 * s, -0.45 * s); c.quadraticCurveTo(0, -0.85 * s, -0.25 * s, -0.8 * s);
+  c.moveTo(0.1 * s, -0.45 * s); c.quadraticCurveTo(0.2 * s, -0.85 * s, 0.45 * s, -0.8 * s); c.stroke(); c.lineCap = 'butt';
+}
+function drawFish(c, s, col){            // рыбка: тело, хвост-треугольник, плавник, глаз
+  c.fillStyle = col;
+  c.beginPath(); c.moveTo(0.5 * s, 0); c.lineTo(1.02 * s, -0.48 * s); c.lineTo(1.02 * s, 0.48 * s); c.closePath(); c.fill(); c.stroke();
+  c.beginPath(); c.ellipse(-0.12 * s, 0, 0.75 * s, 0.52 * s, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.beginPath(); c.moveTo(0.05 * s, -0.3 * s); c.quadraticCurveTo(0.3 * s, 0, 0.05 * s, 0.3 * s); c.stroke();
+  c.fillStyle = PAL.white; c.beginPath(); c.arc(-0.48 * s, -0.12 * s, 0.17 * s, 0, Math.PI * 2); c.fill(); eye(c, -0.5 * s, -0.12 * s, 0.08 * s);
+}
+function drawFrog(c, s, col){            // лягушка: круглое тело, два глаза-бугорка, улыбка
+  c.fillStyle = col;
+  c.beginPath(); c.arc(-0.38 * s, -0.48 * s, 0.3 * s, 0, Math.PI * 2); c.arc(0.38 * s, -0.48 * s, 0.3 * s, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.beginPath(); c.ellipse(0, 0.15 * s, 0.85 * s, 0.68 * s, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.fillStyle = PAL.white; c.beginPath(); c.arc(-0.38 * s, -0.5 * s, 0.17 * s, 0, Math.PI * 2); c.arc(0.38 * s, -0.5 * s, 0.17 * s, 0, Math.PI * 2); c.fill();
+  eye(c, -0.36 * s, -0.5 * s, 0.08 * s); eye(c, 0.4 * s, -0.5 * s, 0.08 * s);
+  c.beginPath(); c.arc(0, 0.12 * s, 0.4 * s, 0.2 * Math.PI, 0.8 * Math.PI); c.stroke();
+}
+function drawBoat(c, s, col){            // кораблик: корпус-трапеция, мачта, белый парус
+  c.fillStyle = col;
+  c.beginPath(); c.moveTo(-0.95 * s, 0.2 * s); c.lineTo(0.95 * s, 0.2 * s); c.lineTo(0.6 * s, 0.7 * s); c.lineTo(-0.6 * s, 0.7 * s); c.closePath(); c.fill(); c.stroke();
+  c.beginPath(); c.moveTo(-0.05 * s, 0.2 * s); c.lineTo(-0.05 * s, -0.9 * s); c.stroke();
+  c.fillStyle = PAL.white; c.beginPath(); c.moveTo(0.02 * s, -0.85 * s); c.lineTo(0.02 * s, 0.08 * s); c.lineTo(0.72 * s, 0.08 * s); c.closePath(); c.fill(); c.stroke();
+  c.fillStyle = col; c.beginPath(); c.moveTo(-0.12 * s, -0.85 * s); c.lineTo(-0.12 * s, -0.25 * s); c.lineTo(-0.62 * s, -0.25 * s); c.closePath(); c.fill(); c.stroke();
+}
+function drawStar(c, s, col){            // звезда: пять лучей и рожица
+  c.fillStyle = col; c.beginPath();
+  for (let i = 0; i < 10; i++){ const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? 0.45 * s : 0.98 * s; c.lineTo(Math.cos(a) * rr, Math.sin(a) * rr + 0.06 * s); }
+  c.closePath(); c.fill(); c.stroke();
+  eye(c, -0.18 * s, 0, 0.08 * s); eye(c, 0.18 * s, 0, 0.08 * s);
+  c.beginPath(); c.arc(0, 0.12 * s, 0.17 * s, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke();
+}
+// Значок двойного пузыря: два наложенных кружка и «2» — читается формой, не цветом (§9).
+function drawHardBadge(c, x, y, r){
+  const s = Math.max(9, r * 0.24);
+  c.save(); c.lineWidth = 2; c.strokeStyle = '#ffffff'; c.fillStyle = '#2f7ef0';
+  c.beginPath(); c.arc(x, y, s, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.fillStyle = '#fff'; c.font = '900 ' + Math.round(s * 1.25) + 'px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('2', x, y + 1); c.restore();
+}
+// Палец-подсказка: кольцо пульсирует над пузырём, кончик указывает на него.
+function drawFinger(c, x, y, t){
+  const k = 0.5 + 0.5 * Math.sin(t * 0.008), r = GEO.r;
+  c.strokeStyle = PAL.accent; c.lineWidth = 3; c.globalAlpha = 0.9 - 0.5 * k;
+  c.beginPath(); c.arc(x - r * 0.45, y - r * 0.35, r * (0.5 + 0.5 * k), 0, Math.PI * 2); c.stroke(); c.globalAlpha = 1;
+  c.save(); c.translate(x + k * 4, y + k * 4); c.rotate(-0.5);
+  c.fillStyle = PAL.white; c.strokeStyle = PAL.outline; c.lineWidth = 2.5;
+  c.beginPath(); c.roundRect(-7, -12, 14, 34, 7); c.fill(); c.stroke();
+  c.beginPath(); c.roundRect(-13, 8, 28, 26, 9); c.fill(); c.stroke();
+  c.restore();
+}
+// Эффекты в canvas (§9): брызги лопнувшего пузыря, улёт тройки, вспышка в стаканчике, всплывающий текст.
+function drawFx(c, f, t){
+  const p = Math.min(1, (t - f.t0) / (f.until - f.t0));
+  if (f.type === 'pop'){
+    c.strokeStyle = PAL.white; c.lineWidth = 3 * (1 - p); c.globalAlpha = 1 - p;
+    c.beginPath(); c.arc(f.x, f.y, f.r * (1 + 0.45 * p), 0, Math.PI * 2); c.stroke();
+    c.fillStyle = PAL.white;
+    for (let i = 0; i < 8; i++){ const a = i * Math.PI / 4 + f.chain, d = f.r * (1 + 0.8 * easeOut(p)); c.beginPath(); c.arc(f.x + Math.cos(a) * d, f.y + Math.sin(a) * d, 4 * (1 - p) + 1, 0, Math.PI * 2); c.fill(); }
+    c.globalAlpha = 1;
+  } else if (f.type === 'fly'){
+    const y = f.y - 150 * easeIn(p), a = 1 - p;
+    c.globalAlpha = a;
+    drawBubbleBack(c, f.x, y, f.r, false);
+    const ofs = SLOT_OFS[3];
+    for (const o of ofs) drawToy(c, f.k, f.x + o[0] * f.r, y + o[1] * f.r, f.r * TOY_K);
+    drawBubbleFront(c, f.x, y, f.r, false);
+    c.fillStyle = PAL.accent;
+    for (let i = 0; i < 6; i++){ const ang = i * 1.05 + p * 3, d = f.r * (1.1 + 0.6 * p); c.beginPath(); c.arc(f.x + Math.cos(ang) * d, y + Math.sin(ang) * d, 3, 0, Math.PI * 2); c.fill(); }
+    c.globalAlpha = 1;
+  } else if (f.type === 'clear'){
+    c.globalAlpha = 1 - p; drawToy(c, f.k, f.x, f.y - 40 * p, f.s * (1 + 0.6 * p)); c.globalAlpha = 1;
+  } else if (f.type === 'text'){
+    const pop = p < 0.18 ? 0.6 + 0.6 * (p / 0.18) : p < 0.3 ? 1.2 - 0.2 * ((p - 0.18) / 0.12) : 1;
+    c.save(); c.globalAlpha = p < 0.75 ? 1 : 1 - (p - 0.75) / 0.25; c.translate(f.x, f.y - 34 * easeOut(p)); c.scale(pop, pop);
+    c.font = (f.big ? '900 30' : '800 22') + 'px system-ui, -apple-system, sans-serif'; c.textAlign = 'center'; c.lineJoin = 'round';
+    c.lineWidth = f.big ? 7 : 5; c.strokeStyle = f.big ? '#7a2fb8' : '#315b70'; c.strokeText(f.text, 0, 0);
+    c.fillStyle = f.big ? '#ffe14d' : '#ffffff'; c.fillText(f.text, 0, 0); c.restore();
+  }
+}
+
+// --- цикл: rAF + watchdog setInterval; безопасно, потому что время абсолютное (§4) ---
+let lastFrame = 0;
+// Ошибка отрисовки не должна останавливать цикл (раньше rAF не перезаказывался — игра «застывала» кадром).
+let renderErr = '';
+function safeRender(){
+  try { render(); }
+  catch (e){ const m = String(e && e.stack || e).slice(0, 300); if (m !== renderErr){ renderErr = m; console.error(e); log('event', 'error', m); }
+    if (G.ending && now() >= G.ending && !G.anim) try { finishEnding(); } catch (e2) {} }   // экран итога всё равно открыть
+}
+function frame(){ requestAnimationFrame(frame); lastFrame = performance.now(); if (!G.paused) safeRender(); }
+setInterval(() => { if (performance.now() - lastFrame > 120 && !G.paused) safeRender(); }, 40);
+
+// --- дебаг-хук (§6): состояние, любой экран, прогон времени, автоигра ---
+window.PENA_V_VANNE = {
+  G, CFG, LEVELS,
+  state(){
+    if (!G.s) return { screen: G.screen };
+    const cols = G.s.cols.map(col => col.map(b => (b.hard ? '#' : '') + b.toys.map(t => 'ABCDEF'[t.k]).join('')).join(' ')).join(' | ');
+    return { level: G.s.li + 1, cols, cup: G.s.cup.map(t => 'ABCDEF'[t.k]).join(''), cap: G.s.cap, moves: G.s.moves, par: G.s.par,
+             win: isWin(G.s), lose: isLose(G.s), why: G.s.why, animating: !!G.anim, screen: G.screen };
+  },
+  play(n){ startLevel(Math.max(0, Math.min(LEVELS.length, n || 1) - 1)); return this.state(); },
+  custom(rows, cap){                            // своя раскладка для проверки: custom([['B'], ['A'], ['AB']], 3) — столбики снизу вверх
+    startLevel(0); G.s = layoutToState(0, parseLayout(rows), cap || CFG.CUP_CAP, 0); G.maxH = Math.max(...G.s.cols.map(c => c.length));
+    G.hintMove = -1; $('tip').textContent = ''; fit(); hud(); R3.foamKey = R3.cupKey = ''; return this.state(); },
+  tap(c, i){ tapBubble(c, i); return this.state(); },
+  undo(){ undo(); return this.state(); },
+  goto(screen){ goto(screen); return G.screen; },
+  solve(){ return G.s ? (solve(G.s) || []).map(m => [m >> 4, m & 15]) : null; },
+  auto(delayMs){ const path = this.solve() || []; path.forEach(([c, i], k) => setTimeout(() => tapBubble(c, i), (delayMs || 700) * (k + 1))); return path; },
+  drive(sec){                                   // ручной прогон игрового времени: часы сдвигаются шагами по 16 мс
+    const steps = Math.ceil(sec * 1000 / 16);
+    for (let k = 0; k < steps; k++){ G.skew += 16; safeRender(); }
+    return this.state();
+  },
+  speed(x){ G.timeScale = x || 1; return G.timeScale; },
+  unlockAll(on){ setUnlockAll(on === undefined ? true : on); if (G.screen === 'menu') goto('menu'); return G.save.unlockAll; },   // чит: открыть все уровни
+  reset(){ try { localStorage.removeItem(SAVE_KEY); } catch (e) {} location.reload(); },
+};
+
+// --- старт ---
+fit(); init3D(); fit(); hud();
+const startHash = location.hash.slice(1) === 'unlock' ? (setUnlockAll(true), 'menu') : location.hash.slice(1);
+if (startHash === 'game') startLevel(G.save.level); else goto(startHash || 'menu');
+requestAnimationFrame(frame);
+log('event', 'boot', 'levels=' + LEVELS.length);
+</script>
+</body>
+</html>
