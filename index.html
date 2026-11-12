@@ -66,6 +66,11 @@ button.primary{background:var(--accent);color:#2a1a08;font-weight:700}
 #toast{position:absolute;left:50%;bottom:96px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:8px 14px;border-radius:10px;
   pointer-events:none;opacity:.95;transition:opacity .25s;max-width:90%;text-align:center;font-size:14px}
 #toast.hide{opacity:0}
+.fbtn{position:relative} .cnt{position:absolute;top:-6px;right:-4px;min-width:24px;height:24px;border-radius:12px;padding:0 6px;background:#ff5a5f;color:#fff;
+  font-size:14px;font-weight:900;line-height:24px;box-shadow:0 2px 0 #b8323a} .cnt.ad{background:#ffb547;color:#5a3300;box-shadow:0 2px 0 #c45f00}
+.cnt svg{vertical-align:-4px}
+button.ad{background:linear-gradient(#7fe08a,#3fbf55);color:#fff;font-weight:800;box-shadow:0 3px 0 #2a8a3c;margin:6px 3px}
+.boost{margin:8px 0 0;color:var(--muted);font-size:13px}
 @media (prefers-reduced-motion: reduce){ .card{animation:none} #toast{transition:none} }
 </style>
 </head>
@@ -74,7 +79,7 @@ button.primary{background:var(--accent);color:#2a1a08;font-weight:700}
   <header><div class="badge"><small>уровень</small><b id="hud-level">1</b></div><span id="hud-moves" class="pill">тапов 0</span><button id="btn-mute" class="round" aria-label="звук"></button></header>
   <div id="game"><canvas id="gl"></canvas><canvas id="cv"></canvas><div id="tip"></div></div>
   <footer>
-    <button id="btn-undo" class="fbtn blue" aria-label="Отмена"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M9 7H15a5 5 0 0 1 0 10H8" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/><path d="M10 3 5 7l5 4" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Отмена</span></button>
+    <button id="btn-undo" class="fbtn blue" aria-label="Отмена"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M9 7H15a5 5 0 0 1 0 10H8" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/><path d="M10 3 5 7l5 4" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Отмена</span><b id="undo-cnt" class="cnt">3</b></button>
     <button id="btn-reset" class="fbtn orange" aria-label="Заново"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M19 12a7 7 0 1 1-2.1-5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/><path d="M18.5 3.5v4.2h-4.2" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     <button id="btn-menu" class="fbtn purple" aria-label="Меню"><svg viewBox="0 0 24 24" width="26" height="26"><path d="M5 7h14M5 12h14M5 17h14" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg></button>
   </footer>
@@ -87,61 +92,139 @@ button.primary{background:var(--accent);color:#2a1a08;font-weight:700}
 'use strict';
 /* ЯДРО */
 // ---------------------------------------------------------------------------
-// «Пена в ванне». Пузыри стоят столбиками (снизу вверх), в пузыре до CFG.CAP игрушек.
-// Тап по пузырю — он лопается, его игрушки падают в ближний пузырь ниже в том же столбике.
+// «Пена в ванне». Столбики (снизу вверх) из элементов: пузырь (до CFG.CAP игрушек), широкий пузырь, губка.
+// Тап по пузырю — он лопается, его игрушки падают потоком вниз в ближний элемент ниже в том же столбике.
 //   влезли  → остаются; три одинаковых в пузыре — пузырь улетает вместе с ними;
-//   не влезли → нижний лопается от тяжести, всё падает дальше (цепочка);
-//   ниже пузырей нет → игрушки в общий стаканчик; там тройка тоже улетает; больше cap — проигрыш.
-// Двойной пузырь (hard): первый тап снимает внешнюю плёнку (игрушки на месте), тяжесть сверху лопает его сразу.
-// Победа — игрушек не осталось нигде. Проигрыш — стаканчик переполнен.
-// Ход кодируется числом m = столбик * 16 + номер пузыря снизу.
+//   не влезли → нижний лопается от тяжести, всё падает дальше (цепочка), тройка в падающей куче улетает на лету;
+//   ниже пузырей нет → игрушки в общую мыльницу (стаканчик); там тройка тоже улетает; больше cap — проигрыш.
+// Механики (v1.0, DESIGN «План v0.5 → v1.0»):
+//   замок (lock)    — тапом не лопается, пока над ним есть пузыри; тяжесть лопает всегда; стал верхним — открылся навсегда;
+//   краник (valves) — на стене у столбика c на высоте k (между рядами k−1 и k), носик в соседний to; открыт/закрыт,
+//                     тап переключает (это ход). Поток, пересекающий высоту k в столбике c при открытом кране, уходит в to
+//                     и падает там с высоты k (в элемент с наибольшим индексом ≤ k−1, нет — в мыльницу). Каждый кран —
+//                     не больше раза за поток. Ряды — текущие индексы (пузыри оседают, кран на стене стоит);
+//   мутный (murky)  — содержимое не видно игроку (солверу видно); проясняется, когда в него упало или он стал верхним;
+//   широкий (wc)    — только нижний ряд, под столбиками wc и wc+1 (общий индекс 0), CFG.WIDE_CAP мест; тройка в нём
+//                     улетает сразу, сам пузырь остаётся; больше мест — лопается, всё в мыльницу; тап — то же;
+//   крепкий (strong)— от перегруза не лопается: добирает до CAP, излишек ложится сверху новыми пузырями по 3
+//                     (тройки в них улетают), цепочка на нём останавливается; тап лопает как обычно;
+//   губка (sp)      — не пузырь, держит одну игрушку: пустая впитывает из потока одну (вид, которого в потоке меньше
+//                     всего), остальное падает мимо; тап «выжимает» — игрушка падает вниз потоком из одной.
+// Победа — игрушек не осталось нигде (и в губках). Проигрыш — только переполнение мыльницы (revive() — «пузырь спасения»).
+// Ход — число: столбик * 16 + номер элемента снизу; краник — VALVE_M + номер краника.
 // ---------------------------------------------------------------------------
 const CFG = {
   CAP: 3,                 // мест в пузыре
+  WIDE_CAP: 5,            // мест в широком пузыре
   MATCH: 3,               // столько одинаковых игрушек улетают (в пузыре и в стаканчике)
   CUP_CAP: 4,             // мест в стаканчике по умолчанию (уровень переопределяет полем cup)
   AIR_MATCH: true,        // в цепочке тройка одинаковых улетает прямо на лету, остаток падает дальше и может влезть
-  GEN_TRIES: 120,         // попыток генератора на уровень (сид от номера уровня, поток детерминирован)
+  REVIVE_TAKE: 2,         // «пузырь спасения»: сколько игрушек забрать из мыльницы вместе с лишней
+  GEN_TRIES: 400,         // попыток генератора при поиске уровня (сид от номера уровня, поток детерминирован; поиск — оффлайн, bake)
   BOT_RUNS: 80,           // прогонов бота-новичка при отборе уровня
+  BOT_MAX_MOVES: 120,     // предел ходов бота (страховка) — дальше партия считается проигранной
+  BOT_VALVE_RUN: 2,       // боты щёлкают краники не больше стольких раз подряд, потом обязаны лопать (как живой игрок)
+  MURKY_NEED: 0.05,       // мутный нужен, если новичок вслепую выигрывает хотя бы на столько реже, чем зрячий
   SOLVER_MAX: 150000,     // предел состояний поиска в ширину (защита от зависания)
+  NEED_PENALTY: 0.3,      // штраф отбора: механика уровня декоративна (без неё решается так же)
   // Кадры анимации хода, мс (делятся на timeScale)
   T_POP: 110,             // пузырь лопнул, игрушки повисли
   T_FALL: 240,            // игрушки долетели до пузыря ниже
+  T_VALVE: 220,           // поток ушёл в краник и перелетел в соседний столбик
+  T_SPONGE: 200,          // губка впитала игрушку
   T_FLY: 380,             // тройка в пузыре улетает
   T_CUP: 300,             // кучка долетела до места над стаканчиком
   T_CUP_STEP: 170,        // одна игрушка опускается в гнездо (по очереди)
   T_CLEAR: 320,           // тройка в стаканчике улетает
   T_OVER: 420,            // стаканчик переполнился
+  T_REVIVE: 520,          // «пузырь спасения»: игрушки поднимаются из мыльницы в новый пузырь
   END_DELAY: 550,         // пауза между последним кадром и экраном победы/поражения
   TOAST_MS: 2400,         // сколько висит тост
   JELLY_MS: 480,          // «желе» пузыря и сплющивание игрушки после приземления, мс
   STAR2_SLACK: 2,         // звёзды: тапов ≤ par → 3, ≤ par + STAR2_SLACK → 2, иначе 1
+  UNDO_START: 3,          // бустер «Отмена»: сколько на старте (дальше — «+1 за рекламу», заглушка)
 };
+const VALVE_M = 256;      // ходы ≥ VALVE_M — тап по кранику
 const KIND_NAMES = ['утёнок', 'кит', 'рыбка', 'лягушка', 'кораблик', 'звезда'];
+const MECHS = ['lock', 'valve', 'murky', 'wide', 'strong', 'sponge'];
 
-// Контент — декларативная таблица. layout — ручной уровень (столбики снизу вверх; буква = игрушка A..F,
-// '#' в начале — двойной пузырь, '' — пустой). Иначе — генератор по параметрам:
+// Контент — декларативная таблица. layout — ручной уровень (столбики снизу вверх; буква = игрушка A..F, префиксы:
+// '#' замок, '?' мутный, '!' крепкий, '*' губка, '=' широкий — в двух соседних столбиках ряда 0: '=AB' и '='),
+// valves — [[столбик, высота, куда, открыт]]. Иначе — генератор по параметрам:
 //   cols — столбиков, maxH — потолок высоты столбика, kinds — видов игрушек, per — игрушек каждого вида (кратно 3),
-//   pure — сколько троек лежат «чистыми» кусками в одном столбике, empty — пустых пузырей, hard — двойных, spread — доля чистых кусков, разбросанных по столбику поодиночке,
+//   pure — сколько троек лежат «чистыми» кусками в одном столбике, empty — пустых пузырей, spread — доля чистых кусков,
+//   разбросанных по столбику поодиночке; механики: lock, murky, strong, sponge, valves — сколько штук, wide — 0/1;
 //   cup — мест в стаканчике, minPar — минимум тапов в лучшем решении,
-//   nov — минимум побед бота-новичка, rnd — потолок побед случайного бота (ввод должен быть важен),
-//   minTri — сколько троек в пузыре новичок должен собирать в среднем, chain — лучшее решение обязано содержать цепочку.
+//   nov / novMax — коридор побед бота-новичка (он не видит мутное), rnd — потолок побед случайного бота,
+//   minTri — сколько троек в пузыре новичок должен собирать в среднем, chain — лучшее решение обязано содержать цепочку;
+//   need — какие механики обязаны быть нужными (по умолчанию — все, что есть на уровне);
+//   pick, seed — запечённый номер раскладки в потоке генератора и номер потока (пишет `node sim.mjs bake`).
+// Коридоры новичка (DIFF): I — главы 11–19 (75–85%), E / M / H — пила с 20-го (лёгкий ~85%, средний ~65%, сложный ~45%).
+const DIFF = { I: { nov: 0.75, novMax: 0.85, rnd: 0.3 }, E: { nov: 0.8, novMax: 0.92, rnd: 0.35 },
+               M: { nov: 0.55, novMax: 0.75, rnd: 0.25 }, H: { nov: 0.35, novMax: 0.55, rnd: 0.2 } };
 const LEVELS = [
   { n: 1, layout: [['AA', 'A'], ['BB', 'B']], cup: 4, hint: true,
     tip: 'Лопни верхний пузырь' },
   { n: 2, layout: [['A', 'BB', 'AA'], ['B']], cup: 4, hint: true,
     tip: 'Перегруз лопает пузырь ниже' },
-  { n: 3, cols: 3, maxH: 3, kinds: 2, per: 3, pure: 1, empty: 1, cup: 4, minPar: 3, nov: 0.9, rnd: 1.0, minTri: 0.5,
+  { n: 3, pick: 7, cols: 3, maxH: 3, kinds: 2, per: 3, pure: 1, empty: 1, cup: 4, minPar: 3, nov: 0.9, rnd: 1.0, minTri: 0.5,
     tip: 'Лишнее падает в мыльницу — не переполни' },
-  { n: 4, cols: 3, maxH: 3, kinds: 3, per: 3, pure: 2, spread: 0.5, empty: 0, cup: 3, minPar: 4, nov: 0.8, rnd: 0.6, minTri: 1, chain: true },
-  { n: 5, cols: 4, maxH: 3, kinds: 4, per: 3, pure: 2, spread: 0.5, empty: 1, cup: 3, minPar: 5, nov: 0.75, rnd: 0.5, minTri: 1, chain: true },
-  { n: 6, cols: 3, maxH: 4, kinds: 3, per: 3, pure: 2, spread: 0.5, empty: 0, hard: 1, cup: 3, minPar: 4, nov: 0.75, rnd: 0.5, minTri: 1,
-    tip: 'Двойной пузырь: первый тап снимает плёнку' },
-  { n: 7, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 3, spread: 0.6, empty: 1, hard: 1, cup: 3, minPar: 5, nov: 0.7, rnd: 0.45, minTri: 1.5, chain: true },
-  { n: 8, cols: 4, maxH: 4, kinds: 3, per: 6, pure: 3, spread: 0.6, empty: 0, hard: 1, cup: 3, minPar: 6, nov: 0.65, rnd: 0.4, minTri: 1.5, chain: true },
-  { n: 9, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 3, spread: 0.7, empty: 1, hard: 2, cup: 3, minPar: 6, nov: 0.6, rnd: 0.35, minTri: 1.5, chain: true },
-  { n: 10, cols: 5, maxH: 4, kinds: 6, per: 3, pure: 4, spread: 0.7, empty: 0, hard: 2, cup: 3, minPar: 7, nov: 0.55, rnd: 0.3, minTri: 2, chain: true },
+  { n: 4, pick: 10, cols: 3, maxH: 3, kinds: 3, per: 3, pure: 2, spread: 0.5, empty: 0, cup: 3, minPar: 4, nov: 0.8, rnd: 0.6, minTri: 1, chain: true },
+  { n: 5, pick: 4, cols: 4, maxH: 3, kinds: 4, per: 3, pure: 2, spread: 0.5, empty: 1, cup: 3, minPar: 5, nov: 0.75, rnd: 0.5, minTri: 1, chain: true },
+  { n: 6, pick: 14, cols: 3, maxH: 4, kinds: 3, per: 3, pure: 2, spread: 0.5, empty: 0, lock: 1, cup: 3, minPar: 4, nov: 0.75, rnd: 0.5, minTri: 1,
+    tip: 'Замок: лопнет, когда над ним пусто' },
+  { n: 7, pick: 161, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 3, spread: 0.6, empty: 1, lock: 1, cup: 3, minPar: 5, nov: 0.7, rnd: 0.45, minTri: 1.5, chain: true },
+  { n: 8, pick: 4, cols: 4, maxH: 4, kinds: 3, per: 6, pure: 3, spread: 0.6, empty: 0, lock: 1, cup: 3, minPar: 6, nov: 0.65, rnd: 0.4, minTri: 1.5, chain: true },
+  { n: 9, pick: 7, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 3, spread: 0.7, empty: 1, lock: 2, cup: 3, minPar: 6, nov: 0.6, rnd: 0.35, minTri: 1.5, chain: true },
+  { n: 10, pick: 10, cols: 5, maxH: 4, kinds: 6, per: 3, pure: 4, spread: 0.7, empty: 0, lock: 2, cup: 3, minPar: 7, nov: 0.55, rnd: 0.3, minTri: 2, chain: true },
+  // Глава 2: замок, краник, мутный
+  { n: 11, pick: 89, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, lock: 2, cup: 3, minPar: 6, ...DIFF.I, minTri: 0.6 },
+  { n: 12, pick: 198, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.7, empty: 0, lock: 2, cup: 3, minPar: 6, ...DIFF.I, minTri: 0.6, chain: true },
+  { n: 13, pick: 37, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.5, empty: 1, valves: 1, cup: 3, minPar: 5, ...DIFF.I, minTri: 0.6,
+    tip: 'Тапни краник: открытый уводит поток вбок' },
+  { n: 14, pick: 207, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, lock: 1, valves: 1, cup: 3, minPar: 6, ...DIFF.I, minTri: 0.6 },
+  { n: 15, pick: 95, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, valves: 2, cup: 3, minPar: 6, ...DIFF.I, minTri: 0.6 },
+  { n: 16, pick: 120, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.7, empty: 0, valves: 1, cup: 3, minPar: 6, ...DIFF.I, minTri: 0.6, chain: true },
+  { n: 17, pick: 25, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, murky: 2, cup: 3, minPar: 6, ...DIFF.I, minTri: 0.6,
+    tip: 'Мутный пузырь прояснится, когда сверху пусто' },
+  { n: 18, pick: 14, seed: 2, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, murky: 2, valves: 1, cup: 3, minPar: 6, ...DIFF.I, minTri: 0.6 },
+  { n: 19, pick: 278, seed: 3, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, murky: 2, lock: 1, cup: 3, minPar: 6, ...DIFF.I, minTri: 0.6 },
+  { n: 20, pick: 341, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.7, empty: 0, lock: 1, valves: 1, murky: 2, cup: 3, minPar: 7, ...DIFF.H, minTri: 0.6 },
+  // Глава 3: широкий, крепкий, губка
+  { n: 21, pick: 104, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.5, empty: 1, wide: 1, cup: 3, minPar: 5, ...DIFF.E, minTri: 0.6,
+    tip: 'Широкий пузырь ловит из двух столбиков' },
+  { n: 22, pick: 45, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 0, wide: 1, valves: 1, cup: 3, minPar: 6, ...DIFF.M, minTri: 0.6 },
+  { n: 23, pick: 302, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, wide: 1, lock: 1, cup: 3, minPar: 6, ...DIFF.E, minTri: 0.6 },
+  { n: 24, pick: 15, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.7, empty: 0, wide: 1, murky: 2, cup: 3, minPar: 7, ...DIFF.H, minTri: 0.6 },
+  { n: 25, pick: 389, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 0, strong: 1, cup: 3, minPar: 5, ...DIFF.E, minTri: 0.6,
+    tip: 'Крепкий пузырь не лопается от тяжести' },
+  { n: 26, pick: 140, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.7, empty: 0, strong: 1, cup: 3, minPar: 6, ...DIFF.M, minTri: 0.6, chain: true },
+  { n: 27, pick: 2, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.6, empty: 0, strong: 1, valves: 1, cup: 3, minPar: 6, ...DIFF.M, minTri: 0.6 },
+  { n: 28, pick: 70, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.7, empty: 0, strong: 1, murky: 2, cup: 3, minPar: 7, ...DIFF.H, minTri: 0.6 },
+  { n: 29, pick: 28, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, sponge: 1, cup: 3, minPar: 5, ...DIFF.E, minTri: 0.6,
+    tip: 'Губка ловит одну игрушку. Тапни — выжмешь' },
+  { n: 30, pick: 51, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.7, empty: 0, sponge: 1, valves: 1, cup: 3, minPar: 7, ...DIFF.H, minTri: 0.6 },
+  // Смеси по 2–3 механики, пила лёгкий / средний / сложный; 40 — финал со всеми
+  { n: 31, pick: 70, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, lock: 1, wide: 1, cup: 3, minPar: 6, ...DIFF.E, minTri: 0.6 },
+  { n: 32, pick: 347, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.6, empty: 0, valves: 1, strong: 1, cup: 3, minPar: 6, ...DIFF.M, minTri: 0.6 },
+  { n: 33, pick: 261, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.7, empty: 0, murky: 2, sponge: 1, cup: 3, minPar: 7, ...DIFF.H, minTri: 0.6 },
+  { n: 34, pick: 22, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, wide: 1, sponge: 1, cup: 3, minPar: 6, ...DIFF.E, minTri: 0.6 },
+  { n: 35, pick: 169, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.6, empty: 0, lock: 2, valves: 1, strong: 1, cup: 3, minPar: 7, ...DIFF.M, minTri: 0.6 },
+  { n: 36, pick: 233, seed: 3, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.7, empty: 0, murky: 2, wide: 1, valves: 2, cup: 3, minPar: 7, ...DIFF.H, minTri: 0.6 },
+  { n: 37, pick: 245, cols: 4, maxH: 4, kinds: 4, per: 3, pure: 2, spread: 0.6, empty: 1, strong: 1, sponge: 1, lock: 1, cup: 3, minPar: 6, ...DIFF.E, minTri: 0.6 },
+  { n: 38, pick: 60, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.6, empty: 0, valves: 2, sponge: 1, cup: 3, minPar: 7, ...DIFF.M, minTri: 0.6 },
+  { n: 39, pick: 361, seed: 1, cols: 5, maxH: 4, kinds: 5, per: 3, pure: 2, spread: 0.7, empty: 0, murky: 2, strong: 2, wide: 1, cup: 3, minPar: 7, ...DIFF.H, minTri: 0.6 },
+  { n: 40, pick: 306, seed: 2, cols: 5, maxH: 4, kinds: 6, per: 3, pure: 3, spread: 0.7, empty: 0, lock: 1, valves: 1, murky: 2, wide: 1, strong: 1, sponge: 1, cup: 3, minPar: 8, ...DIFF.H, minTri: 0.6 },
 ];
+// Какие механики есть на уровне (по параметрам генератора или по ручной раскладке).
+function levelMechs(L, lay){
+  if (lay){
+    const out = new Set(); if (lay.valves.length) out.add('valve');
+    lay.cols.forEach(col => col.forEach(e => { if (e.lock) out.add('lock'); if (e.murky) out.add('murky'); if (e.strong) out.add('strong'); if (e.sp) out.add('sponge'); if (e.w) out.add('wide'); }));
+    return MECHS.filter(m => out.has(m));
+  }
+  return MECHS.filter(m => (m === 'valve' ? L.valves : L[m]) > 0);
+}
 
 // Детерминированный генератор случайных чисел (PROTO-BASE §5). Math.random() не используется.
 function mulberry32(seed){
@@ -156,22 +239,42 @@ function mulberry32(seed){
 }
 function shuffle(a, rnd){ for (let i = a.length - 1; i > 0; i--){ const j = Math.floor(rnd() * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
 
-// Раскладка без id: [[{hard, k:[виды]}…]…] — столбики снизу вверх.
-function parseLayout(rows){
-  return rows.map(col => col.map(str => ({ hard: str[0] === '#', k: str.replace('#', '').split('').map(ch => ch.charCodeAt(0) - 65) })));
+// Раскладка без id: { cols: [[{k:[виды], lock?, murky?, strong?, sp?, w? (1 — широкий, 2 — его правая половина)}…]…],
+// valves: [{c, k, to, open}] } — столбики снизу вверх.
+function parseLayout(rows, valves){
+  const cols = rows.map(col => col.map(str => {
+    const e = { k: [] };
+    for (const ch of str){
+      if (ch === '#') e.lock = true; else if (ch === '?') e.murky = true; else if (ch === '!') e.strong = true;
+      else if (ch === '*') e.sp = true; else if (ch === '=') e.w = 1; else e.k.push(ch.charCodeAt(0) - 65);
+    }
+    return e;
+  }));
+  for (let c = 1; c < cols.length; c++){ const a = cols[c - 1][0], b = cols[c][0]; if (a && b && a.w === 1 && b.w === 1){ b.w = 2; b.k = []; } }
+  return { cols, valves: (valves || []).map(([c, k, to, open]) => ({ c, k, to, open: !!open })) };
 }
-function cloneLayout(lay){ return lay.map(col => col.map(b => ({ hard: b.hard, k: b.k.slice() }))); }
+function cloneLayout(lay){ return { cols: lay.cols.map(col => col.map(e => Object.assign({}, e, { k: e.k.slice() }))), valves: lay.valves.map(v => Object.assign({}, v)) }; }
 function layoutToState(li, lay, cap, par){
   let nid = 1;
-  const cols = lay.map(col => col.map(b => ({ id: nid++, hard: b.hard, toys: b.k.map(k => ({ id: nid++, k })) })));
-  return { li, cols, cup: [], cap, moves: 0, par, prev: null, lost: false, why: '',
-           triples: 0, cupClears: 0, airTriples: 0, chains: 0, lastChain: 0, maxChain: 0, cupMax: 0 };
+  const cols = lay.cols.map(() => []);
+  lay.cols.forEach((col, c) => col.forEach((e) => {
+    if (e.w === 2){ cols[c].push(cols[c - 1][0]); return; }          // правая половина широкого — тот же объект
+    const b = { id: nid++, toys: e.k.map(k => ({ id: nid++, k })) };
+    if (e.lock) b.lock = true; if (e.murky) b.murky = true; if (e.strong) b.strong = true; if (e.sp) b.sp = true; if (e.w === 1) b.wc = c;
+    cols[c].push(b);
+  }));
+  const s = { li, cols, cup: [], cap, moves: 0, par, prev: null, lost: false, why: '', nid, valves: lay.valves.map(v => Object.assign({}, v)),
+              triples: 0, cupClears: 0, airTriples: 0, chains: 0, lastChain: 0, maxChain: 0, cupMax: 0, revives: 0 };
+  settle(s);
+  return s;
 }
 
 // Генератор раскладки. Тройки делятся на «чистые» (pure штук: все три игрушки вида — в одном столбике, кусками
 // 2+1, 1+2 или 1+1+1 в пузырях без чужих) и «россыпь» (игрушки перемешиваются и раскладываются пузырями по 1..CAP).
 // Чистые куски кладутся подряд, россыпь и пустые пузыри вставляются в случайные места — так между кусками
 // появляются помехи. Смешанный пузырь чистым уже не станет, поэтому тройка в пузыре возможна только из чистых кусков.
+// Потом механики: широкий сливает нижние пузыри двух соседних столбиков; замок, мутный, крепкий — на пузыри,
+// над которыми что-то есть; губка вставляется в столбик (над ней хоть один элемент); краник — на высоту между рядами.
 const SPLITS = [[2, 1], [1, 2], [2, 1], [1, 2], [1, 1, 1]];          // как резать чистую тройку (2+1 чаще)
 const CHUNK = [1, 2, 2, 3, 3];                                       // размеры пузырей россыпи (полные чаще — больше цепочек)
 function genLayout(L, rnd){
@@ -185,7 +288,7 @@ function genLayout(L, rnd){
   for (let j = 0; j < nPure; j++){
     const k = triples[j], split = SPLITS[Math.floor(rnd() * SPLITS.length)], c = pickCol(split.length);
     if (c < 0) return null;
-    const pieces = split.map(n => ({ hard: false, k: new Array(n).fill(k) }));
+    const pieces = split.map(n => ({ k: new Array(n).fill(k) }));
     if (rnd() < (L.spread || 0)) for (const pc of pieces) cols[c].splice(Math.floor(rnd() * (cols[c].length + 1)), 0, pc);
     else cols[c].splice(Math.floor(rnd() * (cols[c].length + 1)), 0, ...pieces);
   }
@@ -195,69 +298,179 @@ function genLayout(L, rnd){
   for (let ti = 0; ti < loose.length;){
     const n = Math.min(loose.length - ti, CHUNK[Math.floor(rnd() * CHUNK.length)]), k = loose.slice(ti, ti + n); ti += n;
     if (n === CFG.MATCH && k.every(x => x === k[0])) return null;        // готовая тройка на старте — не годится
-    chunks.push({ hard: false, k });
+    chunks.push({ k });
   }
-  for (let e = 0; e < (L.empty || 0); e++) chunks.push({ hard: false, k: [] });
+  for (let e = 0; e < (L.empty || 0); e++) chunks.push({ k: [] });
   shuffle(chunks, rnd);
   for (const ch of chunks){ const c = pickCol(1); if (c < 0) return null; cols[c].splice(Math.floor(rnd() * (cols[c].length + 1)), 0, ch); }
   if (cols.some(col => !col.length)) return null;
-  const cand = [];                                                     // двойным делаем непустой пузырь, над которым что-то есть
-  cols.forEach(col => col.forEach((b, i) => { if (i < col.length - 1 && b.k.length) cand.push(b); }));
-  if (cand.length < (L.hard || 0)) return null;
-  shuffle(cand, rnd);
-  for (let i = 0; i < (L.hard || 0); i++) cand[i].hard = true;
-  return cols;
+  if (L.wide){                                                         // широкий: нижние пузыри двух соседних столбиков
+    const c = Math.floor(rnd() * (L.cols - 1)), k = cols[c][0].k.concat(cols[c + 1][0].k);
+    if (k.length > CFG.WIDE_CAP || takeTriples(k.map(x => ({ k: x }))).length) return null;
+    cols[c][0] = { k, w: 1 }; cols[c + 1][0] = { k: [], w: 2 };
+  }
+  const cand = (ok) => { const out = []; cols.forEach(col => col.forEach((e, i) => { if (!e.w && !e.lock && !e.murky && !e.strong && ok(e, col, i)) out.push(e); })); return shuffle(out, rnd); };
+  const mark = (n, list, f) => { if (list.length < n) return false; for (let q = 0; q < n; q++) list[q][f] = true; return true; };
+  if (!mark(L.lock || 0, cand((e, col, i) => e.k.length && i < col.length - 1), 'lock')) return null;
+  if (!mark(L.murky || 0, cand((e, col, i) => e.k.length >= 2 && i < col.length - 1), 'murky')) return null;
+  if (!mark(L.strong || 0, cand((e, col, i) => i < col.length - 1), 'strong')) return null;
+  for (let q = 0; q < (L.sponge || 0); q++){                           // губка: над ней хоть один элемент, под широкий не встаёт
+    const c = Math.floor(rnd() * L.cols), col = cols[c], lo = col[0].w ? 1 : 0;
+    if (col.length - 1 < lo) return null;
+    col.splice(lo + Math.floor(rnd() * (col.length - lo)), 0, { k: [], sp: true });
+  }
+  const valves = [];
+  for (let q = 0; q < (L.valves || 0); q++){                           // краник: высота между двумя рядами столбика
+    const opts = [];
+    cols.forEach((col, c) => { for (let k = 1; k < col.length; k++) for (const to of [c - 1, c + 1])
+      if (to >= 0 && to < L.cols && !valves.some(v => v.k === k && Math.min(v.c, v.to) === Math.min(c, to))) opts.push({ c, k, to }); });
+    if (!opts.length) return null;
+    const v = opts[Math.floor(rnd() * opts.length)]; v.open = rnd() < 0.5; valves.push(v);
+  }
+  for (const col of cols) for (let i = 0; i < col.length; i++) if ((col[i].lock || col[i].murky) && !elsAbove(col, i)) return null;
+  return { cols, valves };
+}
+// Есть ли над элементом i пузыри (губка не в счёт — она не пузырь).
+function elsAbove(col, i){ for (let q = i + 1; q < col.length; q++) if (!col[q].sp) return true; return false; }
+
+// Тот же уровень с выключенной механикой — для проверки «нужности» (DESIGN: иначе механика декоративна).
+function stripMech(lay, mech){
+  const L2 = cloneLayout(lay);
+  if (mech === 'valve') L2.valves = [];
+  L2.cols.forEach((col, c) => {
+    for (const e of col){ if (mech === 'lock') delete e.lock; if (mech === 'murky') delete e.murky; if (mech === 'strong') delete e.strong; }
+    if (mech === 'sponge') L2.cols[c] = col.filter(e => !e.sp || e.k.length).map(e => { delete e.sp; return e; });
+    if (mech === 'wide' && col[0] && col[0].w === 1){ const p = L2.cols[c + 1][0], all = col[0].k; delete col[0].w; delete p.w; col[0].k = all.slice(0, CFG.CAP); p.k = all.slice(CFG.CAP); }
+  });
+  return L2;
 }
 
-// Уровень строится один раз и кешируется: ручной — как есть, генерируемый — первый подходящий из потока сида.
+// Уровень строится один раз и кешируется: ручной — как есть; генерируемый — раскладка номер pick из потока сида
+// (номер запекает `node sim.mjs bake` оффлайн: поиск по десяткам кандидатов в браузере занял бы секунды).
+// Нет pick или он устарел (генератор поменялся) — поиск первого подходящего прямо здесь.
 const LEVEL_CACHE = {};
 function levelLayout(li){
   if (LEVEL_CACHE[li]) return LEVEL_CACHE[li];
   const L = LEVELS[li], cap = L.cup || CFG.CUP_CAP;
   if (L.layout){
-    const lay = parseLayout(L.layout), s = layoutToState(li, lay, cap, 0), sol = solve(s);
-    const st = noviceStats(s);
-    return (LEVEL_CACHE[li] = { lay, par: sol ? sol.length : 0, rate: st.rate, random: randomRate(s), triples: st.triples, d: 0, tries: 0 });
+    const lay = parseLayout(L.layout, L.valves), sol = solve(layoutToState(li, lay, cap, 0));
+    return (LEVEL_CACHE[li] = { lay, par: sol ? sol.length : 0, pick: 0 });
   }
-  const rnd = mulberry32(7919 * L.n + 13);
+  if (L.pick){
+    const rnd = levelRnd(L); let lay = null;
+    for (let t = 0; t < L.pick; t++) lay = genLayout(L, rnd);
+    const sol = lay && solve(layoutToState(li, lay, cap, 0));
+    if (sol && sol.length >= (L.minPar || 2)) return (LEVEL_CACHE[li] = { lay, par: sol.length, pick: L.pick });
+  }
+  return (LEVEL_CACHE[li] = levelSearch(li, CFG.GEN_TRIES));
+}
+// Поток генератора уровня: сид от номера (seed — запасной поток, если в основном не нашлось подходящей раскладки).
+function levelRnd(L){ return mulberry32(7919 * L.n + 13 + 1000003 * (L.seed || 0)); }
+// Оценка раскладки против целей уровня: d = 0 — все цели выполнены (штрафы складываются). null — нерешаема или короче minPar.
+// bestD — если штраф до проверки нужности уже не лучше, нужность не считаем (она дорогая).
+function scoreLayout(li, lay, bestD){
+  const L = LEVELS[li], cap = L.cup || CFG.CUP_CAP, s = layoutToState(li, lay, cap, 0), sol = solve(s);
+  if (!sol || (!L.layout && sol.length < (L.minPar || 2))) return null;
+  const st = noviceStats(s), rr = randomRate(s), sc = pathChains(s, sol);
+  let d = Math.max(0, (L.nov || 0) - st.rate) + Math.max(0, st.rate - (L.novMax ?? 1)) + Math.max(0, rr - (L.rnd ?? 1))
+        + Math.max(0, (L.minTri || 0) - st.triples) * 0.25             // мало троек в пузыре у новичка — штраф
+        + (L.chain && !sc ? 0.3 : 0);                                  // цепочка не нужна для лучшего решения — штраф
+  const r = { lay, par: sol.length, rate: st.rate, random: rr, triples: st.triples, chains: sc, d, need: {} };
+  if (bestD !== undefined && d >= bestD) return r;
+  for (const m of (L.need || levelMechs(L, lay))){ r.need[m] = mechNeeded(lay, m, cap, sol.length, s, st.rate); if (!r.need[m]) r.d += CFG.NEED_PENALTY; }
+  return r;
+}
+// Поиск: первая раскладка с d = 0 из потока сида, иначе лучшая из tries. pick — её номер (для запекания).
+function levelSearch(li, tries){
+  const L = LEVELS[li], rnd = levelRnd(L);
   let best = null;
-  for (let t = 0; t < CFG.GEN_TRIES; t++){
+  for (let t = 0; t < tries; t++){
     const lay = genLayout(L, rnd); if (!lay) continue;
-    const s = layoutToState(li, lay, cap, 0);
-    const sol = solve(s); if (!sol || sol.length < (L.minPar || 2)) continue;
-    const st = noviceStats(s), rr = randomRate(s), sc = pathChains(s, sol);
-    const d = Math.max(0, (L.nov || 0) - st.rate) + Math.max(0, rr - (L.rnd ?? 1))
-            + Math.max(0, (L.minTri || 0) - st.triples) * 0.25           // мало троек в пузыре у новичка — штраф
-            + (L.chain && !sc ? 0.3 : 0);                                // цепочка не нужна для лучшего решения — штраф
-    if (!best || d < best.d) best = { lay, par: sol.length, rate: st.rate, random: rr, triples: st.triples, d, tries: t + 1 };
-    if (d === 0) break;
+    const r = scoreLayout(li, lay, best ? best.d : undefined); if (!r || (best && r.d >= best.d)) continue;
+    best = Object.assign(r, { pick: t + 1 });
+    if (best.d === 0) break;
   }
-  return (LEVEL_CACHE[li] = best);
+  return best;
+}
+// Полная оценка того уровня, что строит игра (для sim.mjs audit).
+function levelStats(li){ const g = levelLayout(li); return Object.assign(scoreLayout(li, g.lay), { pick: g.pick }); }
+// Нужна ли механика: без неё уровень нерешаем, решается за другое число тапов или её лучший путь не проходит
+// настоящий уровень. Мутный нужен, если новичок вслепую выигрывает заметно реже, чем видя содержимое.
+function mechNeeded(lay, mech, cap, par, s0, blindRate){
+  if (mech === 'murky'){ let w = 0; for (let k = 0; k < CFG.BOT_RUNS; k++) w += botRun(s0, pickNoviceSee, 500 + k).win ? 1 : 0; return w / CFG.BOT_RUNS - blindRate >= CFG.MURKY_NEED; }
+  const sol2 = solve(layoutToState(0, stripMech(lay, mech), cap, 0));
+  if (!sol2 || sol2.length !== par) return true;
+  if (mech === 'wide' || mech === 'sponge') return false;              // раскладка другая — путь не переносится
+  let s = layoutToState(0, lay, cap, 0);
+  for (const m of sol2){ s = applyMove(s, m); if (!s || s.lost) return true; }
+  return !isWin(s);
 }
 function createState(li){
   const g = levelLayout(li), L = LEVELS[li];
   return layoutToState(li, cloneLayout(g.lay), L.cup || CFG.CUP_CAP, g.par);
 }
 
-function cloneState(s){
-  return { ...s, cols: s.cols.map(col => col.map(b => ({ id: b.id, hard: b.hard, toys: b.toys.slice() }))), cup: s.cup.slice() };
+// Широкий пузырь лежит в двух столбиках одним объектом — копия сохраняет это.
+function cloneCols(cols){
+  let shared = null;
+  return cols.map(col => col.map(b => {
+    if (b.wc === undefined){ const x = Object.assign({}, b); x.toys = b.toys.slice(); return x; }
+    shared = shared || new Map(); let x = shared.get(b.id);
+    if (!x){ x = Object.assign({}, b); x.toys = b.toys.slice(); shared.set(b.id, x); }
+    return x;
+  }));
 }
-function toysLeft(s){ let n = s.cup.length; for (const col of s.cols) for (const b of col) n += b.toys.length; return n; }
+function cloneState(s){
+  return { ...s, cols: cloneCols(s.cols), cup: s.cup.slice(), valves: s.valves.map(v => Object.assign({}, v)) };
+}
+// Обход элементов по одному разу (широкий — только в левом столбике).
+function eachEl(cols, fn){ cols.forEach((col, c) => col.forEach((b, i) => { if (b.wc === undefined || b.wc === c) fn(b, c, i); })); }
+function toysLeft(s){ let n = s.cup.length; eachEl(s.cols, b => { n += b.toys.length; }); return n; }
+function canTap(s, c, i){
+  const col = s.cols[c], b = col && col[i];
+  if (!b || s.lost) return false;
+  if (b.wc !== undefined && b.wc !== c) return false;                 // широкий — один ход, по левому столбику
+  if (b.lock && elsAbove(col, i)) return false;                        // замок держит, пока над ним пузыри
+  if (b.sp && !b.toys.length) return false;                            // пустую губку не выжать
+  return true;
+}
 function legalMoves(s){
   const out = []; if (s.lost) return out;
-  s.cols.forEach((col, c) => col.forEach((b, i) => out.push(c * 16 + i)));
+  s.cols.forEach((col, c) => col.forEach((b, i) => { if (canTap(s, c, i)) out.push(c * 16 + i); }));
+  for (let q = 0; q < s.valves.length; q++) out.push(VALVE_M + q);
   return out;
 }
 function isWin(s){ return toysLeft(s) === 0; }
 function isLose(s){ return s.lost; }
+function removeEl(n, c, j){
+  const b = n.cols[c][j]; n.cols[c].splice(j, 1);
+  if (b.wc !== undefined){ const o = b.wc === c ? c + 1 : b.wc, q = n.cols[o].indexOf(b); if (q >= 0) n.cols[o].splice(q, 1); }
+  return b;
+}
+// Замок и мутный, над которыми не осталось пузырей, открываются навсегда. Возвращает события.
+function settle(n){
+  const ev = [];
+  n.cols.forEach(col => col.forEach((b, i) => {
+    if ((b.lock || b.murky) && !elsAbove(col, i)){
+      if (b.lock) ev.push({ t: 'unlock', id: b.id }); if (b.murky) ev.push({ t: 'reveal', id: b.id });
+      delete b.lock; delete b.murky;
+    }
+  }));
+  return ev;
+}
 
-// Тройки одинаковых из набора игрушек (без изменения набора) — для «тройки на лету».
+// Тройки одинаковых из набора игрушек (без изменения набора) — для «тройки на лету» и широкого пузыря.
 function takeTriples(toys){
   const by = {}, out = [];
   for (const t of toys) (by[t.k] = by[t.k] || []).push(t);
   for (const k in by) for (let q = 0; q + CFG.MATCH <= by[k].length; q += CFG.MATCH) out.push(...by[k].slice(q, q + CFG.MATCH));
   return out;
 }
+// Игрушки, сгруппированные по виду (порядок первых появлений) — для крепкого и «пузыря спасения».
+function groupKinds(toys){ const order = []; for (const t of toys) if (!order.includes(t.k)) order.push(t.k); return order.flatMap(k => toys.filter(t => t.k === k)); }
+// Губка впитывает игрушку того вида, которого в потоке меньше всего (одиночку), при равенстве — первую.
+function pickLone(toys){ const cnt = {}; for (const t of toys) cnt[t.k] = (cnt[t.k] || 0) + 1; let best = toys[0]; for (const t of toys) if (cnt[t.k] < cnt[best.k]) best = t; return best; }
+const isTriple = (toys) => toys.length === CFG.MATCH && toys.every(t => t.k === toys[0].k);
 // Порядок, в котором кучка опускается в стаканчик: сначала игрушки видов, которые соберут тройку (больше своих
 // уже в стаканчике — раньше), затем остальные; одинаковые подряд. Детерминированно.
 function orderForCup(cup, falling){
@@ -285,68 +498,149 @@ function clearCup(s){
 }
 // Снимок для анимации: оболочка тянет каждую игрушку и пузырь по id от снимка к снимку.
 function snap(s, air, ev, dur){
-  return { cols: s.cols.map(col => col.map(b => ({ id: b.id, hard: b.hard, toys: b.toys.slice() }))), cup: s.cup.slice(), cap: s.cap,
+  return { cols: cloneCols(s.cols), cup: s.cup.slice(), cap: s.cap, valves: s.valves.map(v => v.open),
            air: air ? { c: air.c, at: air.at, cup: !!air.cup, toys: air.toys.slice() } : null, ev, dur };
 }
-
-// Ход. frames (необязательно) — сюда пишутся снимки для анимации. Нелегальный ход → null.
-function applyMove(s, m, frames){
-  const c = m >> 4, i = m & 15, col0 = s.cols[c];
-  if (s.lost || !col0 || !col0[i]) return null;
-  const n = cloneState(s); n.prev = s; n.moves++;
-  const col = n.cols[c];
-  if (col[i].hard){                                                    // двойной: тап снимает только плёнку
-    col[i].hard = false; n.lastChain = 0;
-    if (frames) frames.push(snap(n, null, [{ t: 'film', id: col[i].id }], CFG.T_POP));
-    return n;
-  }
-  const b = col.splice(i, 1)[0];
-  let falling = b.toys, j = i - 1, chain = 0;
-  if (frames) frames.push(snap(n, falling.length ? { c, at: i, toys: falling } : null, [{ t: 'pop', id: b.id, chain: 0 }], CFG.T_POP));
-  while (falling.length){
-    if (j < 0){                                                        // ниже пузырей нет — в стаканчик
-      // Кучка зависает над стаканчиком, игрушки опускаются по одной: каждая встаёт рядом со своими, три одинаковых
-      // сразу улетают. Первыми идут те, что собирают тройку. Нет места и тройки не собрать — переполнение.
-      let pend = orderForCup(n.cup, falling);
-      if (frames) frames.push(snap(n, { cup: true, toys: pend }, [{ t: 'cupHover' }], CFG.T_CUP));
-      while (pend.length){
-        const toy = pend[0]; pend = pend.slice(1);
-        insertGrouped(n.cup, toy); n.cupMax = Math.max(n.cupMax, n.cup.length);
-        if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'cup', id: toy.id }], CFG.T_CUP_STEP));
-        const gone = clearCup(n);
-        if (gone.length){ n.cupClears += gone.length / CFG.MATCH; if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'cupClear', toys: gone }], CFG.T_CLEAR)); }
-        if (n.cup.length > n.cap){ n.lost = true; n.why = 'cup'; n.overId = toy.id; if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'overflow', id: toy.id }], CFG.T_OVER)); break; }
-      }
-      break;
+// Кучка зависает над стаканчиком, игрушки опускаются по одной: каждая встаёт рядом со своими, три одинаковых
+// сразу улетают. Первыми идут те, что собирают тройку. Нет места и тройки не собрать — переполнение.
+function toCup(n, falling, frames){
+  let pend = orderForCup(n.cup, falling);
+  if (frames) frames.push(snap(n, { cup: true, toys: pend }, [{ t: 'cupHover' }], CFG.T_CUP));
+  while (pend.length){
+    const toy = pend[0]; pend = pend.slice(1);
+    insertGrouped(n.cup, toy); n.cupMax = Math.max(n.cupMax, n.cup.length);
+    if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'cup', id: toy.id }], CFG.T_CUP_STEP));
+    const gone = clearCup(n);
+    if (gone.length){ n.cupClears += gone.length / CFG.MATCH; if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'cupClear', toys: gone }], CFG.T_CLEAR)); }
+    if (n.cup.length > n.cap){
+      n.lost = true; n.why = 'cup'; n.overId = toy.id; n.overPend = pend;   // остаток кучки не пропадает — для «пузыря спасения»
+      if (frames) frames.push(snap(n, pend.length ? { cup: true, toys: pend } : null, [{ t: 'overflow', id: toy.id }], CFG.T_OVER));
+      return;
     }
-    const tb = col[j];
-    if (tb.toys.length + falling.length <= CFG.CAP){                   // влезли
-      tb.toys = tb.toys.concat(falling);
-      if (frames) frames.push(snap(n, null, [{ t: 'land', id: tb.id }], CFG.T_FALL));
-      if (tb.toys.length === CFG.MATCH && tb.toys.every(t => t.k === tb.toys[0].k)){
-        col.splice(j, 1); n.triples++;
+  }
+}
+// Поток падает в столбике col: top — самый верхний ряд, куда он может попасть, bnd — самая верхняя высота краника,
+// которую он ещё пересечёт. Возвращает число пузырей, лопнувших от тяжести.
+function flow(n, col, top, bnd, falling, frames){
+  let chain = 0; const used = [];
+  while (falling.length){
+    const arr = n.cols[col], j = Math.min(arr.length - 1, top);
+    let vq = -1;                                                       // краник: самый верхний открытый на пути
+    n.valves.forEach((v, q) => { if (v.open && v.c === col && v.k > j && v.k <= bnd && !used.includes(q) && (vq < 0 || v.k > n.valves[vq].k)) vq = q; });
+    if (vq >= 0){
+      const v = n.valves[vq]; used.push(vq);
+      if (frames){ frames.push(snap(n, { c: col, at: v.k - 0.5, toys: falling }, [{ t: 'valveIn', q: vq }], CFG.T_FALL));
+                   frames.push(snap(n, { c: v.to, at: v.k - 0.5, toys: falling }, [{ t: 'valve', q: vq }], CFG.T_VALVE)); }
+      col = v.to; top = v.k - 1; bnd = v.k - 1;
+      continue;
+    }
+    if (j < 0){ toCup(n, falling, frames); break; }                    // ниже пузырей нет — в стаканчик
+    const tb = arr[j];
+    if (tb.sp){                                                        // губка: пустая впитывает одну, остальное мимо
+      if (!tb.toys.length){
+        const one = pickLone(falling); tb.toys = [one]; falling = falling.filter(t => t !== one);
+        if (frames) frames.push(snap(n, falling.length ? { c: col, at: j, toys: falling } : null, [{ t: 'sponge', id: tb.id, toy: one.id }], CFG.T_SPONGE));
+      }
+      top = j - 1; bnd = j;
+      continue;
+    }
+    const wide = tb.wc !== undefined, cap = wide ? CFG.WIDE_CAP : CFG.CAP;
+    if (tb.toys.length + falling.length <= cap){                       // влезли
+      tb.toys = tb.toys.concat(falling); falling = [];
+      const ev = [{ t: 'land', id: tb.id }]; if (tb.murky){ delete tb.murky; ev.push({ t: 'reveal', id: tb.id }); }
+      if (frames) frames.push(snap(n, null, ev, CFG.T_FALL));
+      if (wide){                                                       // широкий: тройка улетает, пузырь остаётся
+        const gone = takeTriples(tb.toys);
+        if (gone.length){ tb.toys = tb.toys.filter(t => !gone.includes(t)); n.triples += gone.length / CFG.MATCH;
+          if (frames) frames.push(snap(n, null, [{ t: 'wideClear', id: tb.id, toys: gone }], CFG.T_CLEAR)); }
+      } else if (isTriple(tb.toys)){
+        removeEl(n, col, j); n.triples++;
         if (frames) frames.push(snap(n, null, [{ t: 'fly', id: tb.id, toys: tb.toys.slice(), k: tb.toys[0].k }], CFG.T_FLY));
       }
       break;
     }
-    col.splice(j, 1); chain++;                                         // не влезли — лопается от тяжести
+    if (tb.strong){                                                    // крепкий: добирает до CAP, излишек — пузырями сверху
+      const order = orderForCup(tb.toys, falling), room = CFG.CAP - tb.toys.length;
+      tb.toys = tb.toys.concat(order.slice(0, room)); delete tb.murky;
+      const rest = groupKinds(order.slice(room)), fresh = [];
+      for (let q = 0; q < rest.length; q += CFG.CAP) fresh.push({ id: n.nid++, toys: rest.slice(q, q + CFG.CAP) });
+      arr.splice(j + 1, 0, ...fresh);
+      if (frames) frames.push(snap(n, null, [{ t: 'strong', id: tb.id, fresh: fresh.map(b => b.id) }], CFG.T_FALL));
+      for (const b of [tb].concat(fresh)) if (isTriple(b.toys)){
+        removeEl(n, col, arr.indexOf(b)); n.triples++;
+        if (frames) frames.push(snap(n, null, [{ t: 'fly', id: b.id, toys: b.toys.slice(), k: b.toys[0].k }], CFG.T_FLY));
+      }
+      break;
+    }
+    removeEl(n, col, j); chain++;                                      // не влезли — лопается от тяжести
     falling = tb.toys.concat(falling);
-    if (frames) frames.push(snap(n, { c, at: j, toys: falling }, [{ t: 'pop', id: tb.id, chain }], CFG.T_FALL));
+    if (frames) frames.push(snap(n, { c: wide ? tb.wc + 0.5 : col, at: j, toys: falling }, [{ t: 'pop', id: tb.id, chain }], CFG.T_FALL));
     if (CFG.AIR_MATCH){
       const gone = takeTriples(falling); falling = falling.filter(t => !gone.includes(t));
-      if (gone.length){ n.airTriples += gone.length / CFG.MATCH; if (frames) frames.push(snap(n, falling.length ? { c, at: j, toys: falling } : null, [{ t: 'airClear', toys: gone }], CFG.T_CLEAR)); }
+      if (gone.length){ n.airTriples += gone.length / CFG.MATCH; if (frames) frames.push(snap(n, falling.length ? { c: wide ? tb.wc + 0.5 : col, at: j, toys: falling } : null, [{ t: 'airClear', toys: gone }], CFG.T_CLEAR)); }
     }
-    j--;
+    top = j - 1; bnd = j;
   }
+  return chain;
+}
+
+// Ход. frames (необязательно) — сюда пишутся снимки для анимации. Нелегальный ход → null.
+function applyMove(s, m, frames){
+  if (s.lost) return null;
+  if (m >= VALVE_M){                                                   // краник: открыть / закрыть
+    const q = m - VALVE_M; if (!s.valves[q]) return null;
+    const n = cloneState(s); n.prev = s; n.moves++; n.lastChain = 0; n.vrun = (s.vrun || 0) + 1;
+    n.valves[q].open = !n.valves[q].open;
+    if (frames) frames.push(snap(n, null, [{ t: 'valveToggle', q, open: n.valves[q].open }], CFG.T_POP));
+    return n;
+  }
+  const c = m >> 4, i = m & 15;
+  if (!canTap(s, c, i)) return null;
+  const n = cloneState(s); n.prev = s; n.moves++; n.vrun = 0;
+  const b = n.cols[c][i];
+  let falling;
+  if (b.sp){                                                           // губка: выжать — игрушка падает вниз
+    falling = b.toys; b.toys = [];
+    if (frames) frames.push(snap(n, { c, at: i, toys: falling }, [{ t: 'squeeze', id: b.id }], CFG.T_POP));
+  } else {
+    removeEl(n, c, i); falling = b.toys;
+    if (frames) frames.push(snap(n, falling.length ? { c: b.wc !== undefined ? b.wc + 0.5 : c, at: i, toys: falling } : null, [{ t: 'pop', id: b.id, chain: 0 }], CFG.T_POP));
+  }
+  const chain = flow(n, c, i - 1, i, falling, frames);
   n.lastChain = chain; n.chains += chain; n.maxChain = Math.max(n.maxChain, chain);
+  if (!n.lost){ const ev = settle(n); if (ev.length && frames) frames.push(snap(n, null, ev, CFG.T_POP)); }   // на проигрыше раскладку не досчитываем
   return n;
 }
 function undoMove(s){ return s.prev || s; }
+// «Пузырь спасения» после переполнения: лишняя игрушка (и остаток кучки) плюс две из мыльницы (сначала того же вида)
+// поднимаются в новый пузырь поверх самого низкого столбика. Игрушки не пропадают. Отмена после него ведёт к ходу до проигрыша.
+function revive(s, frames){
+  if (!s.lost) return null;
+  const n = cloneState(s); n.prev = s.prev; n.lost = false; n.why = ''; n.revives++;
+  const over = n.cup.find(t => t.id === s.overId);
+  let rescue = (over ? [over] : []).concat(s.overPend || []);
+  n.cup = n.cup.filter(t => t !== over);
+  for (let q = 0; q < CFG.REVIVE_TAKE && n.cup.length; q++){
+    let at = -1; for (let i = n.cup.length - 1; i >= 0 && at < 0; i--) if (rescue.some(r => r.k === n.cup[i].k)) at = i;
+    rescue.push(n.cup.splice(at < 0 ? n.cup.length - 1 : at, 1)[0]);
+  }
+  rescue = groupKinds(rescue);
+  let c = 0; n.cols.forEach((col, q) => { if (col.length < n.cols[c].length) c = q; });
+  const ev = [];
+  for (let q = 0; q < rescue.length; q += CFG.CAP){
+    const b = { id: n.nid++, toys: rescue.slice(q, q + CFG.CAP) };
+    if (isTriple(b.toys)){ n.triples++; ev.push({ t: 'airClear', toys: b.toys }); continue; }
+    n.cols[c].push(b); ev.push({ t: 'revive', id: b.id });
+  }
+  delete n.overId; delete n.overPend;
+  if (frames) frames.push(snap(n, null, ev, CFG.T_REVIVE));
+  return n;
+}
 
-// Ключ состояния без id — для поиска.
+// Ключ состояния без id — для поиска (мутность на ход игры не влияет и в ключ не входит).
 function stateKey(s){
-  return s.cols.map(col => col.map(b => (b.hard ? '#' : '') + b.toys.map(t => t.k).sort().join('')).join('.')).join('|')
-    + '>' + s.cup.map(t => t.k).sort().join('');
+  return s.cols.map(col => col.map(b => (b.lock ? 'L' : '') + (b.strong ? 'S' : '') + (b.sp ? 'G' : '') + (b.wc !== undefined ? 'W' : '')
+    + b.toys.map(t => t.k).sort().join('')).join('.')).join('|') + '>' + s.cup.map(t => t.k).sort().join('') + '~' + s.valves.map(v => v.open ? 1 : 0).join('');
 }
 // Поиск в ширину: кратчайшее по тапам решение (список ходов) или null.
 function solve(s){
@@ -370,27 +664,45 @@ function solve(s){
 }
 
 // Боты (PROTO-BASE §6): случайный; новичок — не делает ход, проигрывающий сразу, и берёт любой ход, который что-то
-// убирает, иначе случайный; жадный — максимум убранных игрушек за ход, при равенстве меньше в стаканчике.
+// убирает, иначе случайный; содержимое мутных пузырей он не видит (pickNoviceSee — видит, для проверки «нужности»);
+// жадный — максимум убранных игрушек за ход, при равенстве меньше в стаканчике.
 function pickRandom(s, rnd){ const ms = legalMoves(s); return ms[Math.floor(rnd() * ms.length)]; }
-function pickNovice(s, rnd){
+// Что видит игрок: игрушки мутных пузырей — неизвестные (вид у каждой свой, ни с чем не совпадает).
+function blindView(s){
+  let any = false; eachEl(s.cols, b => { if (b.murky) any = true; }); if (!any) return s;
+  const m = cloneState(s); m.prev = null;
+  eachEl(m.cols, b => { if (b.murky) b.toys = b.toys.map(t => ({ id: t.id, k: 100 + t.id })); });
+  return m;
+}
+// Ходы бота: после BOT_VALVE_RUN щелчков краников подряд — только тапы по пузырям (иначе щёлкал бы вечно).
+function botMoves(s){ const ms = legalMoves(s); if ((s.vrun || 0) < CFG.BOT_VALVE_RUN) return ms; const p = ms.filter(m => m < VALVE_M); return p.length ? p : ms; }
+function noviceChoice(s, rnd){
   const left = toysLeft(s);
-  const opts = legalMoves(s).map(m => { const n = applyMove(s, m); return { m, gain: left - toysLeft(n), lose: n.lost }; });
+  const opts = botMoves(s).map(m => { const n = applyMove(s, m); return { m, gain: left - toysLeft(n), lose: n.lost }; });
   const safe = opts.filter(o => !o.lose), pool = safe.length ? safe : opts;
   const good = pool.filter(o => o.gain > 0), from = good.length ? good : pool;
   return from[Math.floor(rnd() * from.length)].m;
 }
+function pickNovice(s, rnd){ return noviceChoice(blindView(s), rnd); }
+function pickNoviceSee(s, rnd){ return noviceChoice(s, rnd); }
 function pickGreedy(s){
   let best = null, bs = -Infinity; const left = toysLeft(s);
-  for (const m of legalMoves(s)){
-    const n = applyMove(s, m), sc = n.lost ? -1000 : (left - toysLeft(n)) * 10 - n.cup.length;
+  for (const m of botMoves(s)){
+    const n = applyMove(s, m), sc = n.lost ? -1000 : (left - toysLeft(n)) * 10 - n.cup.length - (m >= VALVE_M ? 0.5 : 0);
     if (sc > bs){ bs = sc; best = m; }
   }
   return best;
 }
-function botRun(s, pick, seed){
-  const rnd = mulberry32(seed); let chainTaps = 0;
-  while (!isWin(s) && !isLose(s)){ s = applyMove(s, pick(s, rnd)); s.prev = null; if (s.lastChain > 0) chainTaps++; }
-  return { win: isWin(s), moves: s.moves, par: s.par, why: s.why, chainTaps, triples: s.triples, cupClears: s.cupClears, airTriples: s.airTriples, cupMax: s.cupMax, maxChain: s.maxChain };
+// revives — сколько раз бот берёт «пузырь спасения» после переполнения (для метрики «спасает ли одно продолжение»).
+function botRun(s, pick, seed, revives){
+  const rnd = mulberry32(seed); let chainTaps = 0, revived = 0;
+  for (;;){
+    while (!isWin(s) && !isLose(s) && s.moves < CFG.BOT_MAX_MOVES){ s = applyMove(s, pick(s, rnd)); s.prev = null; if (s.lastChain > 0) chainTaps++; }
+    if (isLose(s) && revived < (revives || 0)){ s = revive(s); revived++; continue; }
+    break;
+  }
+  return { win: isWin(s), moves: s.moves, par: s.par, why: isWin(s) ? '' : s.why || 'stuck', chainTaps, triples: s.triples, cupClears: s.cupClears,
+           airTriples: s.airTriples, cupMax: s.cupMax, maxChain: s.maxChain, revived };
 }
 // Доля побед новичка и среднее число троек, собранных прямо в пузыре (главное «ага» механики).
 function noviceStats(s0){
@@ -402,7 +714,7 @@ function noviceStats(s0){
 function pathChains(s, path){ let n = 0; for (const m of path){ s = applyMove(s, m); if (s.lastChain > 0) n++; } return n; }
 function randomRate(s0){ let w = 0; for (let k = 0; k < CFG.BOT_RUNS; k++) w += botRun(s0, pickRandom, 900 + k).win ? 1 : 0; return w / CFG.BOT_RUNS; }
 function randomRun(li, seed){ return botRun(createState(li), pickRandom, seed); }
-function noviceRun(li, seed){ return botRun(createState(li), pickNovice, seed); }
+function noviceRun(li, seed, revives){ return botRun(createState(li), pickNovice, seed, revives); }
 function greedyRun(li){ return botRun(createState(li), pickGreedy, 1); }
 /* КОНЕЦ ЯДРА */
 
@@ -422,7 +734,7 @@ function save(){ try { localStorage.setItem(SAVE_KEY, JSON.stringify(G.save)); }
 const G = {
   s: null,                       // состояние ядра (уже после последнего хода)
   screen: 'menu',                // menu | game | win | lose | help
-  save: Object.assign({ level: 0, muted: false, best: {}, unlockAll: false, seenTips: {} }, loadSave()),   // unlockAll — чит (PROTO-BASE §6)
+  save: Object.assign({ level: 0, muted: false, best: {}, unlockAll: false, seenTips: {}, undos: CFG.UNDO_START }, loadSave()),   // unlockAll — чит (PROTO-BASE §6); undos — бустер «Отмена»
   anim: null,                    // проигрывание хода: { frames, starts, end, k }
   fx: [],                        // эффекты: { type, t0, until, … } — дедлайны в абсолютном времени
   wob: {},                       // id тугого пузыря → когда начал дрожать
@@ -431,11 +743,18 @@ const G = {
   squash: {},                    // id игрушки → когда приземлилась (сплющивание)
   press: null,                   // { id, t } — пузырь под пальцем (вдавливается до отпускания)
   combo: 0,                      // троек за текущий ход (подпись «комбо»)
+  valveAnim: {},                 // номер краника → когда щёлкнул / пропустил поток (качание ручки)
   timeScale: 1,
   paused: false,
   skew: 0,                       // сдвиг часов для drive(): ручной прогон игрового времени
-  maxH: 3,                       // высота самого высокого столбика на старте уровня (для раскладки)
+  maxH: 3,                       // высота самого высокого столбика (для раскладки; растёт от крепкого и «пузыря спасения»)
+  reviveUsed: false,             // «пузырь спасения» уже брали на этом уровне (один раз за уровень)
+  extraSlot: false,              // уровень начат с «+1 место в мыльнице»
+  offer: null,                   // открытое предложение монетизации: { type, back } — для журнала decline
+  monet: {},                     // счётчики monet.* за сеанс (offer/accept/decline по типам) — PENA_V_VANNE.monet()
 };
+// Монетизация в прототипе — заглушки: «реклама» выдаёт награду сразу, всё пишется в журнал monet.* (мерить, где игрок упирается).
+function monet(kind, type, info){ const k = kind + ':' + type; G.monet[k] = (G.monet[k] || 0) + 1; log('event', 'monet.' + kind, 'type=' + type + ' level=' + (G.s ? G.s.li + 1 : 0) + (info ? ' ' + info : '')); }
 function now(){ return performance.now() + G.skew; }
 
 // --- звук: WebAudio-синтез без файлов, ленивый старт по первому жесту (§8) ---
@@ -476,6 +795,11 @@ const Snd = {
   cupClear(){ [659, 880, 1175].forEach((f, i) => this.tone(f, f, 120, 'triangle', 0.15, i * 0.06)); log('sound', 'cupClear'); },
   thud(){ this.tone(150, 105, 120, 'sine', 0.32); log('sound', 'thud'); },
   over(){ this.tone(230, 110, 400, 'sawtooth', 0.11); log('sound', 'overflow'); },
+  click(){ this.tone(900, 700, 40, 'square', 0.06); this.tone(500, 420, 60, 'sine', 0.12, 0.02); log('sound', 'click'); },
+  squish(d){ this.hiss(420, 160, 0.22, d); this.tone(180, 120, 140, 'sine', 0.16, d); log('sound', 'squish'); },
+  pour(){ this.hiss(2400, 260, 0.1); this.hiss(1200, 220, 0.08, 0.05); log('sound', 'pour'); },
+  unlock(){ this.tone(1200, 1500, 50, 'square', 0.06); this.tone(1800, 1800, 70, 'triangle', 0.1, 0.05); log('sound', 'unlock'); },
+  revive(){ [392, 523, 659, 784, 1047].forEach((f, i) => this.tone(f, f * 1.02, 160, 'sine', 0.16, i * 0.07)); this.hiss(3000, 400, 0.06); log('sound', 'revive'); },
   win(){ [523, 659, 784, 1047].forEach((f, i) => this.tone(f, f, 220, 'sine', 0.2, i * 0.09)); log('sound', 'win'); },
   lose(){ [392, 330, 262].forEach((f, i) => this.tone(f, f * 0.97, 230, 'triangle', 0.16, i * 0.12)); log('sound', 'lose'); },
 };
@@ -499,6 +823,7 @@ function goto(screen, payload){
     }
     card.innerHTML = `<h2>Пена в ванне</h2><p>Лопай пузыри — игрушки падают ниже. Уровень ${G.save.level + 1} из ${LEVELS.length}</p>
       <button class="primary" data-act="play">Играть</button> <button data-act="help">Как играть</button>
+      <div class="boost">Отмен в запасе: <b>${G.save.undos}</b></div>
       <div class="levels">${lv}</div>
       ${G.save.unlockAll ? '<button class="cheat" data-act="relock">Чит включён · закрыть обратно</button>' : '<button class="cheat" data-act="unlock">Чит: открыть все уровни</button>'}
       <button class="cheat" data-act="wipe">Сбросить прогресс</button>`;
@@ -507,28 +832,60 @@ function goto(screen, payload){
       <li>Тапни пузырь — он лопнет, игрушки упадут в пузырь ниже.</li>
       <li>В пузыре 3 места. Не влезли — нижний лопается, и всё летит дальше.</li>
       <li>Три одинаковых в пузыре — пузырь улетает. В цепочке тройка улетает прямо на лету.</li>
-      <li>Ниже пузырей — стаканчик. Там тройка тоже улетает, а переполнится — уровень заново.</li>
-      <li>Двойной пузырь: первый тап снимает плёнку, а тяжесть сверху лопает его сразу.</li></ul>
+      <li>Ниже пузырей — мыльница. Там тройка тоже улетает, а переполнится — проигрыш.</li>
+      <li><b>Замок</b> — лопнет, когда над ним пусто, или от тяжести сверху.</li>
+      <li><b>Краник</b> — тап открывает и закрывает; открытый уводит падающее в соседний столбик.</li>
+      <li><b>Мутный</b> — что внутри, видно, когда он сверху или в него что-то упало.</li>
+      <li><b>Широкий</b> — один пузырь под двумя столбиками, 5 мест.</li>
+      <li><b>Крепкий</b> — не лопается от тяжести: лишнее ложится сверху новым пузырём.</li>
+      <li><b>Губка</b> — ловит одну игрушку; тап выжимает её вниз.</li></ul>
       <button class="primary" data-act="menu">Понятно</button>`;
   if (screen === 'win') card.innerHTML = `<h2>Ванна чистая!</h2><div class="stars">${payload ? payload.stars : ''}</div><p>${payload ? payload.text : ''}</p>
       <button class="primary" data-act="next">Дальше</button> <button data-act="retry">Ещё раз</button>`;
   if (screen === 'lose'){
-    const why = 'Стаканчик переполнился.';
-    card.innerHTML = `<h2>Упс!</h2><p>${why}</p><button class="primary" data-act="retry">Заново</button> <button data-act="undo">Отменить ход</button> <button data-act="menu">Меню</button>`;
+    const canRevive = G.s && G.s.lost && !G.reviveUsed;
+    card.innerHTML = `<h2>Мыльница переполнилась!</h2><p>${canRevive ? 'Лишние игрушки можно поднять в новый пузырь.' : 'Попробуй ещё раз.'}</p>
+      ${canRevive ? `<button class="primary ad" data-act="revive">${AD_ICON} Пузырь спасения</button><br>` : ''}
+      <button data-act="undo">Отменить ход${undoTag()}</button> <button ${canRevive ? '' : 'class="primary"'} data-act="retry">Заново</button> <button data-act="menu">Меню</button>`;
+    if (canRevive){ G.offer = { type: 'revive', back: 'lose' }; monet('offer', 'revive'); }
+  }
+  if (screen === 'start'){                           // перед уровнем: «+1 место в мыльнице» за рекламу
+    const li = payload ?? G.save.level, L = LEVELS[li], b = G.save.best[li] || 0;
+    G.pending = li;
+    card.innerHTML = `<h2>Уровень ${li + 1}</h2><div class="stars">${starStr(b)}</div><p>${L.tip ? 'Новое: ' + L.tip.toLowerCase() : 'Мыльница: ' + (L.cup || CFG.CUP_CAP) + ' места'}</p>
+      <button class="ad" data-act="slot">${AD_ICON} +1 место в мыльнице</button><br><button class="primary" data-act="go">Играть</button>`;
+    G.offer = { type: 'slot', back: 'start' }; monet('offer', 'slot', 'next=' + (li + 1));
+  }
+  if (screen === 'undoOffer'){                       // отмены кончились — +1 за рекламу
+    card.innerHTML = `<h2>Отмены кончились</h2><p>Посмотри рекламу — получишь ещё одну и сразу отменишь ход.</p>
+      <button class="primary ad" data-act="undoAd">${AD_ICON} +1 отмена</button> <button data-act="undoNo">Не надо</button>`;
+    G.offer = { type: 'undo', back: payload || 'game' }; monet('offer', 'undo');
   }
 }
+const AD_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" style="vertical-align:-3px"><rect x="2" y="4" width="20" height="14" rx="3" fill="currentColor" opacity=".25"/><path d="M10 8l5 3-5 3z" fill="currentColor"/></svg>';
+function undoTag(){ return G.save.undos > 0 ? ' (' + G.save.undos + ')' : ' · ' + AD_ICON; }
+// Отказ от открытого предложения (ушли с экрана, не взяв) — в журнал.
+function declineOffer(){ if (G.offer){ monet('decline', G.offer.type); G.offer = null; } }
+// Перед уровнем — экран с «+1 место» (с 4-го уровня; на 1–3 мыльница и так на 4 места).
+function openLevel(li){ li = Math.max(0, Math.min(LEVELS.length - 1, li)); if (li < 3) startLevel(li); else goto('start', li); }
 $('card').addEventListener('click', (e) => {
   const el = e.target && e.target.closest ? e.target.closest('button') : null;
   const act = el && el.dataset && el.dataset.act; if (!act) return;
   Snd.init(); log('input', 'button', act);
-  if (act === 'play') startLevel(G.save.level);
-  else if (act === 'retry') startLevel(G.s ? G.s.li : G.save.level);
-  else if (act === 'next') startLevel(Math.min((G.s ? G.s.li + 1 : G.save.level), LEVELS.length - 1));
-  else if (act === 'undo'){ goto('game'); undo(); }
+  if (act === 'revive'){ G.offer = null; doRevive(); return; }
+  if (act === 'slot'){ G.offer = null; monet('accept', 'slot', 'next=' + (G.pending + 1)); startLevel(G.pending, true); return; }
+  if (act === 'undoAd'){ G.offer = null; monet('accept', 'undo'); G.save.undos++; save(); useUndo(); return; }
+  if (act === 'undoNo'){ const back = G.offer ? G.offer.back : 'game'; declineOffer(); goto(back); return; }
+  if (act === 'undo'){ const was = G.offer; if (G.s && G.save.undos <= 0){ G.offer = null; if (was) monet('decline', was.type); goto('undoOffer', 'lose'); return; } declineOffer(); goto('game'); useUndo(); return; }
+  declineOffer();
+  if (act === 'play') openLevel(G.save.level);
+  else if (act === 'go') startLevel(G.pending, false);
+  else if (act === 'retry') openLevel(G.s ? G.s.li : G.save.level);
+  else if (act === 'next') openLevel(G.s ? G.s.li + 1 : G.save.level);
   else if (act === 'help') goto('help');
-  else if (act === 'lvl'){ const li = +el.dataset.li; if (isOpen(li)) startLevel(li); else toast('Сначала пройди уровень ' + (G.save.level + 1)); }
+  else if (act === 'lvl'){ const li = +el.dataset.li; if (isOpen(li)) openLevel(li); else toast('Сначала пройди уровень ' + (G.save.level + 1)); }
   else if (act === 'unlock' || act === 'relock'){ setUnlockAll(act === 'unlock'); goto('menu'); }
-  else if (act === 'wipe'){ G.save = { level: 0, muted: G.save.muted, best: {}, unlockAll: false, seenTips: {} }; save(); goto('menu'); }
+  else if (act === 'wipe'){ G.save = { level: 0, muted: G.save.muted, best: {}, unlockAll: false, seenTips: {}, undos: CFG.UNDO_START }; save(); goto('menu'); }
   else goto('menu');
 });
 window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (h === 'game' && !G.s) startLevel(G.save.level); else if (h && h !== G.screen) goto(h); });
@@ -536,33 +893,51 @@ window.addEventListener('hashchange', () => { const h = location.hash.slice(1); 
 let toastUntil = 0;
 function toast(msg){ const t = $('toast'); t.textContent = msg; t.classList.remove('hide'); toastUntil = now() + CFG.TOAST_MS; }
 
-function startLevel(li){
+function startLevel(li, extraSlot){
   G.s = createState(li); G.fx = []; G.wob = {}; G.squash = {}; G.press = null; G.anim = null; G.ending = 0;
-  if (R3.ok){ for (const o of R3.toyObj.values()) R3.scene.remove(o); R3.toyObj.clear(); for (const o of R3.bubObj.values()) R3.scene.remove(o); R3.bubObj.clear(); }
-  G.maxH = Math.max(...G.s.cols.map(c => c.length));
+  G.reviveUsed = false; G.extraSlot = !!extraSlot; G.offer = null;
+  if (extraSlot) G.s.cap++;                                  // «+1 место в мыльнице» на этот уровень
+  clear3D();
+  G.maxH = fieldH();
   const L = LEVELS[li];
   G.hintMove = L.hint ? ((solve(G.s) || [])[0] ?? -1) : -1;
   $('tip').textContent = L.tip || '';
-  log('event', 'level.start', 'level=' + (li + 1) + ' par=' + G.s.par + ' cup=' + G.s.cap);
+  log('event', 'level.start', 'level=' + (li + 1) + ' par=' + G.s.par + ' cup=' + G.s.cap + ' mechs=' + (levelMechs(L, levelLayout(li).lay).join(',') || '-'));
   goto('game'); fit(); hud();
 }
+// Высота поля в рядах (крепкий и «пузырь спасения» могут нарастить столбик — тогда раскладка ужимается).
+function fieldH(){ return Math.max(3, ...G.s.cols.map(c => c.length)); }
+function regrow(){ const h = fieldH(); if (h > G.maxH){ G.maxH = h; GEO = computeGeo(); R3.foamKey = R3.cupKey = R3.valveKey = ''; } }
 function hud(){
   $('hud-level').textContent = String(G.s ? G.s.li + 1 : 1);
   $('hud-moves').textContent = G.s ? 'тапов ' + G.s.moves : '';
   $('btn-mute').innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="#fff"/>'
     + (G.save.muted ? '<path d="M16 9l5 6M21 9l-5 6" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>' : '<path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>') + '</svg>';
   $('btn-undo').disabled = !(G.s && G.s.prev);
+  $('undo-cnt').innerHTML = G.save.undos > 0 ? String(G.save.undos) : AD_ICON;
+  $('undo-cnt').classList.toggle('ad', G.save.undos <= 0);
 }
 
 // Тап по пузырю (c — столбик, i — номер снизу). Идущая анимация прошлого хода доигрывается мгновенно.
 function tapBubble(c, i){
+  if (!G.s) return;
+  const col = G.s.cols[c], b = col && col[i]; if (!b) return;
+  if (b.wc !== undefined) c = b.wc;                          // широкий — ход по левому столбику
+  if (!canTap(G.s, c, i) && G.screen === 'game' && !G.ending){  // замок / пустая губка: отклик без хода
+    G.wob[b.id] = now(); Snd.thud(); buzz(15);
+    toast(b.lock ? 'Замок: сначала лопни пузыри над ним' : 'Губка пустая — выжимать нечего');
+    log('input', 'blocked', (b.lock ? 'lock' : 'sponge') + ' c=' + c + ' i=' + i); return;
+  }
+  tapMove(c * 16 + i);
+}
+function tapValve(q){ tapMove(VALVE_M + q); }
+function tapMove(m){
   if (!G.s || G.screen !== 'game' || G.ending) return;
-  const b = G.s.cols[c] && G.s.cols[c][i]; if (!b) return;
   if (G.anim){ G.anim = null; log('fx.end', 'move', 'skipped'); }
   const frames = [snap(G.s, null, [], 0)];
-  const n = applyMove(G.s, c * 16 + i, frames); if (!n) return;
-  log('input', 'tap', 'c=' + c + ' i=' + i);
-  G.s = n; G.hintMove = -1; buzz(10);
+  const n = applyMove(G.s, m, frames); if (!n) return;
+  log('input', 'tap', m >= VALVE_M ? 'valve=' + (m - VALVE_M) : 'c=' + (m >> 4) + ' i=' + (m & 15));
+  G.s = n; G.hintMove = -1; buzz(10); regrow();
   startAnim(frames); hud();
   if (isWin(n)){ G.ending = G.anim.end + CFG.END_DELAY; log('event', 'level.win', 'moves=' + n.moves + ' par=' + n.par); }
   else if (isLose(n)){ G.ending = G.anim.end + CFG.END_DELAY; log('event', 'level.lose', 'why=' + n.why + ' moves=' + n.moves); }
@@ -592,10 +967,34 @@ function fireEvents(F, prevF){
     } else if (e.t === 'land'){
       G.wob[e.id] = t + landAt; Snd.land(landSec);
       for (const col of F.cols) for (const b of col) if (b.id === e.id) landToys(b.toys.map(x => x.id), t + landAt);
-    } else if (e.t === 'film'){
-      const p = lay.get(e.id); G.wob[e.id] = t; Snd.thud(); buzz(12);
-      if (p){ if (!R3.ok) G.fx.push({ type: 'pop', x: p.x, y: p.y, r: p.s * 1.04, t0: t, until: t + 300 / G.timeScale, chain: 0 }); spawnPop(p.x, p.y, p.s * 1.04, 0); }
-      log('event', 'film');
+    } else if (e.t === 'valveToggle'){
+      Snd.click(); buzz(8); G.valveAnim[e.q] = t;
+      log('event', 'valve.toggle', 'q=' + e.q + ' open=' + e.open);
+    } else if (e.t === 'valveIn'){ Snd.pour(); G.valveAnim[e.q] = t; }
+    else if (e.t === 'valve'){
+      const v = valveXY(G.s.valves[e.q]); spawnSparks(v.x, v.y, 0.5, 6, 0.6);
+      log('event', 'valve', 'q=' + e.q);
+    } else if (e.t === 'sponge'){
+      G.wob[e.id] = t + landAt; Snd.squish(landSec); landToys([e.toy], t + landAt);
+      log('event', 'sponge.soak');
+    } else if (e.t === 'squeeze'){
+      const p = lay.get(e.id); G.wob[e.id] = t; Snd.squish(0); buzz(12);
+      if (p) spawnPop(p.x, p.y + p.s * 0.3, p.s * 0.6, 0);
+      log('event', 'sponge.squeeze');
+    } else if (e.t === 'strong'){
+      G.wob[e.id] = t + landAt; Snd.thud(); buzz(15);
+      for (const col of F.cols) for (const b of col) if (b.id === e.id || e.fresh.includes(b.id)){ G.wob[b.id] = t + landAt; landToys(b.toys.map(x => x.id), t + landAt); }
+      const p = lay.get(e.id); if (p) say(p.x, p.y - p.s * 1.2, 'выдержал!');
+      log('event', 'strong', 'fresh=' + e.fresh.length);
+    } else if (e.t === 'unlock' || e.t === 'reveal'){
+      const p = layoutFrame(F).get(e.id); G.wob[e.id] = t;
+      if (e.t === 'unlock') Snd.unlock(); else Snd.whoosh();
+      if (p){ spawnSparks(p.x, p.y, 0.5, e.t === 'unlock' ? 10 : 6, 0.7); if (e.t === 'unlock') G.fx.push({ type: 'unlock', x: p.x + p.s * 0.62, y: p.y - p.s * 0.62, r: p.s, t0: t, until: t + 700 / G.timeScale }); }
+      log('event', e.t);
+    } else if (e.t === 'revive'){
+      const p = layoutFrame(F).get(e.id); Snd.revive(); buzz([10, 30, 10]);
+      if (p){ spawnSparks(p.x, p.y, 0.5, 24, 1.2); say(p.x, p.y - p.s * 1.3, 'Спасено!', true); G.wob[e.id] = t + landAt; }
+      log('event', 'revive.bubble');
     } else if (e.t === 'fly'){
       const p = lay.get(e.id); Snd.fly(G.combo); buzz([10, 30, 10]);
       if (p){ if (R3.ok) spawnFlyer(p.x, p.y, p.s, e.k); else G.fx.push({ type: 'fly', x: p.x, y: p.y, r: p.s, k: e.k, t0: t, until: t + 700 / G.timeScale }); spawnSparks(p.x, p.y, 0, 14, 1); triple(p.x, p.y - p.s * 1.1, '×3'); }
@@ -603,8 +1002,8 @@ function fireEvents(F, prevF){
     } else if (e.t === 'cupHover'){ Snd.whoosh(); }
     else if (e.t === 'cup'){
       Snd.cup(landSec, F.cup.length); landToys([e.id], t + landAt);
-    } else if (e.t === 'airClear' || e.t === 'cupClear'){
-      const air = e.t === 'airClear'; Snd.fly(G.combo); buzz([10, 30, 10]);
+    } else if (e.t === 'airClear' || e.t === 'cupClear' || e.t === 'wideClear'){
+      const air = e.t === 'airClear' || e.t === 'wideClear'; Snd.fly(G.combo); buzz([10, 30, 10]);
       // тройка съезжается к средней игрушке и лопается в одной точке — видно, что убрались именно эти три
       const mid = lay.get(e.toys[1].id) || lay.get(e.toys[0].id);
       for (const toy of e.toys){
@@ -614,8 +1013,8 @@ function fireEvents(F, prevF){
       }
       if (mid) setTimeout(() => spawnSparks(mid.x, mid.y, mid.z || 0, 18, 1.1), 150 / G.timeScale);
       const p0 = mid;
-      if (p0) triple(air ? W / 2 : p0.x, air ? p0.y - GEO.r * 1.9 : GEO.cupY - GEO.cupH * 0.8, air ? '×3 на лету!' : '×3');
-      log('event', air ? 'air.triple' : 'cup.clear', 'kind=' + KIND_NAMES[e.toys[0].k]);
+      if (p0) triple(air ? (e.t === 'wideClear' ? p0.x : W / 2) : p0.x, air ? p0.y - GEO.r * 1.9 : GEO.cupY - GEO.cupH * 0.8, e.t === 'wideClear' ? '×3' : air ? '×3 на лету!' : '×3');
+      log('event', e.t === 'wideClear' ? 'wide.triple' : air ? 'air.triple' : 'cup.clear', 'kind=' + KIND_NAMES[e.toys[0].k]);
     } else if (e.t === 'overflow'){
       Snd.over(); buzz(80); G.fx.push({ type: 'shake', amp: 10, t0: t, until: t + 480 / G.timeScale });
       log('event', 'overflow');
@@ -638,6 +1037,24 @@ function undo(){
   if (!G.s || !G.s.prev) return;
   G.s = undoMove(G.s); G.anim = null; G.ending = 0; G.fx = []; log('input', 'undo'); hud();
 }
+// Бустер «Отмена»: тратит одну из запаса; запас пуст — предложение «+1 за рекламу».
+function useUndo(){
+  if (!G.s || !G.s.prev) return;
+  if (G.save.undos <= 0){ goto('undoOffer', G.screen === 'lose' ? 'lose' : 'game'); return; }
+  G.save.undos--; save(); log('event', 'booster', 'undo left=' + G.save.undos);
+  if (G.screen !== 'game') goto('game');
+  undo();
+}
+// «Пузырь спасения» (за рекламу, один раз за уровень): лишние игрушки поднимаются в новый пузырь.
+function doRevive(){
+  if (!G.s || !G.s.lost || G.reviveUsed) return;
+  monet('accept', 'revive');
+  const frames = [snap(G.s, G.s.overPend && G.s.overPend.length ? { cup: true, toys: G.s.overPend } : null, [], 0)];
+  const n = revive(G.s, frames); if (!n) return;
+  G.s = n; G.reviveUsed = true; G.ending = 0; regrow();
+  goto('game'); startAnim(frames); hud();
+  log('event', 'revive', 'cup=' + n.cup.length + '/' + n.cap);
+}
 
 // --- геометрия: виртуальная ширина VW, всё в виртуальных юнитах (§2) ---
 const cv = $('cv'), ctx = cv.getContext('2d');
@@ -653,7 +1070,11 @@ function computeGeo(){
   const step = r * 1.8;                                       // шаг пузырей в столбике (лёгкое перекрытие пены)
   return { nc, colW, r, step, waterY, baseY: waterY - r - 10, cupY, cupH };   // низ пузыря на 10 px выше воды и пены
 }
-function bubbleXY(c, i){ return { x: W / 2 + (c - (GEO.nc - 1) / 2) * GEO.colW, y: GEO.baseY - i * GEO.step }; }
+function bubbleXY(c, i){ return { x: W / 2 + (c - (GEO.nc - 1) / 2) * GEO.colW, y: GEO.baseY - i * GEO.step }; }   // c и i могут быть дробными
+// Краник на стене: в ромбе между четырьмя пузырями — посередине между столбиками c и to, на высоте k (между рядами k−1 и k).
+function valveXY(v){ return { x: (bubbleXY(v.c, 0).x + bubbleXY(v.to, 0).x) / 2, y: GEO.baseY - (v.k - 0.5) * GEO.step, dir: Math.sign(v.to - v.c) }; }
+const WIDE_K = () => (GEO.colW / 2 + GEO.r * 0.92) / GEO.r;      // широкий пузырь: полуширина в радиусах
+const VALVE_R = 0.5;                                             // радиус касания краника в долях радиуса пузыря
 const TOY_K = 0.38;                                         // размер игрушки в долях радиуса пузыря (когда их три)
 const TOY_BY_N = [0, 0.46, 0.38, 0.28];                     // одна ≈0,62 D, две ≈0,44 D, три ≈0,36 D (видимый размер = TOY_FIT × s)
 // Места игрушек внутри пузыря (доли радиуса): 1, 2 или 3 штуки.
@@ -668,12 +1089,24 @@ function cupSlots(n, cap){
 // Раскладка снимка: id → { x, y, s } (для пузыря s — радиус, для игрушки — размер).
 function layoutFrame(F){
   const m = new Map(), r = GEO.r, ts = r * TOY_K;   // ts — размер игрушек в полёте
-  F.cols.forEach((col, c) => col.forEach((b, i) => {
-    const p = bubbleXY(c, i); m.set(b.id, { x: p.x, y: p.y, s: r, hard: b.hard, bubble: true });
+  eachEl(F.cols, (b, c, i) => {
+    if (b.wc !== undefined){                                  // широкий: под двумя столбиками, игрушки в ряд
+      const p = bubbleXY(b.wc + 0.5, 0), n = b.toys.length, kx = WIDE_K();
+      m.set(b.id, { x: p.x, y: p.y, s: r, wide: kx, bubble: true });
+      b.toys.forEach((t, k) => m.set(t.id, { x: p.x + (k - (n - 1) / 2) * r * Math.min(0.62, (kx * 1.5) / Math.max(1, n)), y: p.y + (k % 2 ? -0.16 : 0.14) * r, s: r * 0.34, k: t.k }));
+      return;
+    }
+    const p = bubbleXY(c, i);
+    if (b.sp){                                                // губка: игрушка (одна) перед губкой
+      m.set(b.id, { x: p.x, y: p.y, s: r, sp: true, bubble: true });
+      b.toys.forEach(t => m.set(t.id, { x: p.x, y: p.y - r * 0.05, s: r * 0.4, k: t.k, z: 0.75 }));
+      return;
+    }
+    m.set(b.id, { x: p.x, y: p.y, s: r, lock: !!b.lock, murky: !!b.murky, strong: !!b.strong, n: b.toys.length, bubble: true });
     const ofs = SLOT_OFS[Math.min(3, b.toys.length)];
     const bs = r * TOY_BY_N[Math.min(3, b.toys.length)];
-    b.toys.forEach((t, k) => m.set(t.id, { x: p.x + ofs[k][0] * r, y: p.y + ofs[k][1] * r, s: bs, k: t.k }));
-  }));
+    b.toys.forEach((t, k) => m.set(t.id, { x: p.x + ofs[k][0] * r, y: p.y + ofs[k][1] * r, s: bs, k: t.k, hidden: !!b.murky }));
+  });
   const cs = cupSlots(F.cup.length, F.cap);
   if (F.air && F.air.cup){                                    // кучка висит над мыльницей
     F.air.toys.forEach((t, k) => m.set(t.id, { x: cs.hx(k, F.air.toys.length), y: cs.hoverY, s: cs.s, k: t.k, z: V3.CUP_Z + 0.75, air: true }));
@@ -707,36 +1140,41 @@ function layoutFrame(F){
 // --- ввод: Pointer Events, порог тап/драг 10 px, pointercancel = pointerup (§3) ---
 let down = null;
 function toVirtual(e){ const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / scale, y: (e.clientY - r.top) / scale }; }
+// Что под пальцем: краник (проверяется первым — он маленький и стоит между пузырями), иначе ближайший элемент.
 function bubbleAt(p){
   if (!G.s || !GEO) return null;
+  for (let q = 0; q < G.s.valves.length; q++){ const v = valveXY(G.s.valves[q]); if (Math.hypot(p.x - v.x, p.y - v.y) < GEO.r * VALVE_R * 1.25) return { valve: q }; }
   let best = null, bd = Infinity;
-  G.s.cols.forEach((col, c) => col.forEach((b, i) => {
-    const q = bubbleXY(c, i), d = Math.hypot(p.x - q.x, p.y - q.y);
-    if (d < GEO.r * 1.08 && d < bd){ bd = d; best = { c, i }; }
-  }));
+  eachEl(G.s.cols, (b, c, i) => {
+    const q = b.wc !== undefined ? bubbleXY(b.wc + 0.5, 0) : bubbleXY(c, i);
+    const kx = b.wc !== undefined ? WIDE_K() : 1, d = Math.hypot((p.x - q.x) / kx, p.y - q.y);
+    if (d < GEO.r * 1.08 && d < bd){ bd = d; best = { c, i, id: b.id }; }
+  });
   return best;
 }
 cv.addEventListener('pointerdown', (e) => { Snd.init(); down = toVirtual(e); down.id = e.pointerId; try { cv.setPointerCapture(e.pointerId); } catch (err) {}
-  const hit = bubbleAt(down); if (hit && G.s && !G.ending){ G.press = { id: G.s.cols[hit.c][hit.i].id, t: now() }; Snd.press(); } });
+  const hit = bubbleAt(down); if (hit && G.s && !G.ending){ G.press = { id: hit.valve !== undefined ? 'v' + hit.valve : hit.id, t: now() }; Snd.press(); } });
 function onUp(e){
   if (!down || e.pointerId !== down.id) return;
   const p = toVirtual(e), moved = Math.hypot(p.x - down.x, p.y - down.y) > 10 / scale;
   const start = down; down = null; G.press = null;
   if (moved || e.type === 'pointercancel') return;
-  const hit = bubbleAt(start); if (hit) tapBubble(hit.c, hit.i);
+  const hit = bubbleAt(start); if (!hit) return;
+  if (hit.valve !== undefined) tapValve(hit.valve); else tapBubble(hit.c, hit.i);
 }
 cv.addEventListener('pointerup', onUp); cv.addEventListener('pointercancel', onUp);
 document.addEventListener('keydown', (e) => {          // дубли на клавиатуру для отладки (§3): цифра — верхний тапабельный пузырь столбика
   if (e.key >= '1' && e.key <= '9' && G.s){
     const c = +e.key - 1, col = G.s.cols[c]; if (!col) return;
-    if (col.length) tapBubble(c, col.length - 1);
+    for (let i = col.length - 1; i >= 0; i--) if (canTap(G.s, c, i)){ tapBubble(c, i); break; }
   }
-  if (e.key === 'z' || e.key === 'u') undo();
+  if (e.key === 'z' || e.key === 'u') useUndo();
+  if (e.key === 'v' && G.s && G.s.valves.length) tapValve(0);
   if (e.key === 'r' && G.s) startLevel(G.s.li);
   if (e.key === 'm') goto('menu');
   if (e.key === 'h' && G.s){ G.hintMove = (solve(G.s) || [])[0] ?? -1; }
 });
-$('btn-undo').onclick = () => { log('input', 'button', 'undo'); undo(); };
+$('btn-undo').onclick = () => { log('input', 'button', 'undo'); useUndo(); };
 $('btn-reset').onclick = () => { log('input', 'button', 'reset'); startLevel(G.s ? G.s.li : 0); };
 $('btn-menu').onclick = () => { log('input', 'button', 'menu'); goto('menu'); };
 $('btn-mute').onclick = () => { Snd.init(); G.save.muted = !G.save.muted; save(); hud(); log('input', 'button', 'mute=' + G.save.muted); };
@@ -784,12 +1222,14 @@ function render(){
     if (t >= a.end){ G.anim = null; log('fx.end', 'move'); }
     else { A = a.frames[a.k - 1]; B = a.frames[a.k]; p = Math.min(1, (t - a.starts[a.k]) / (B.dur / G.timeScale)); }
   }
-  if (G.s && !B){ A = B = { cols: G.s.cols, cup: G.s.cup, cap: G.s.cap, air: null, ev: G.s.lost && G.s.overId ? [{ t: 'overflow', id: G.s.overId }] : [] }; }
+  if (G.s && !B){ A = B = { cols: G.s.cols, cup: G.s.cup, cap: G.s.cap, valves: G.s.valves.map(v => v.open),
+                            air: G.s.lost && G.s.overPend && G.s.overPend.length ? { cup: true, toys: G.s.overPend } : null,
+                            ev: G.s.lost && G.s.overId ? [{ t: 'overflow', id: G.s.overId }] : [] }; }
   const view = B ? buildView(A, B, p, t) : null;
   if (R3.ok) draw3D(view, t); else if (view) draw2D(view, t);
-  if (view) for (const b of view.bubbles) if (b.hard) drawHardBadge(ctx, b.x + b.r * 0.66, b.y - b.r * 0.66, b.r);
+  if (view) drawBadges(ctx, view, t);
   G.fx = G.fx.filter(f => f.until > t);
-  for (const f of G.fx) if (!R3.ok || f.type === 'text') drawFx(ctx, f, t);
+  for (const f of G.fx) if (!R3.ok || f.type === 'text' || f.type === 'unlock') drawFx(ctx, f, t);
   if (!G.s) return;
   // подсказка-палец на обучающих уровнях
   if (G.hintMove >= 0 && !G.anim){
@@ -805,28 +1245,33 @@ function buildView(A, B, p, t){
   const pos = (id, ease) => { const b = LB.get(id), a = LA && LA.get(id) || b, e = ease(p); return { x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), s: lerp(a.s, b.s, e), z: lerp(a.z || 0, b.z || 0, e) }; };
   const jelly = (t0) => { if (t0 === undefined || t < t0) return 0; const q = (t - t0) / CFG.JELLY_MS; return q >= 1 ? 0 : Math.sin(q * Math.PI * 3) * (1 - q); };
   const bubbles = [];
-  B.cols.forEach(col => col.forEach(b => {
-    const q = pos(b.id, easeOut), w = jelly(G.wob[b.id]);
+  eachEl(B.cols, (b) => {
+    const q = pos(b.id, easeOut), w = jelly(G.wob[b.id]), lb = LB.get(b.id);
     if (G.wob[b.id] !== undefined && t > G.wob[b.id] + CFG.JELLY_MS) delete G.wob[b.id];
     const press = G.press && G.press.id === b.id ? Math.min(1, (t - G.press.t) / 90) : 0;
-    bubbles.push({ id: b.id, hard: b.hard, x: q.x, y: q.y, r: q.s * (1 - 0.08 * press), jelly: w });
-  }));
+    bubbles.push({ id: b.id, x: q.x, y: q.y, r: q.s * (1 - 0.08 * press), jelly: w, lock: lb.lock, murky: lb.murky, strong: lb.strong, wide: lb.wide || 0, sp: !!lb.sp, n: lb.n || 0 });
+  });
   const air = new Set(B.air ? B.air.toys.map(x => x.id) : []);
   const toys = [];
-  const addToy = (toy) => { const q = pos(toy.id, easeIn); const lb = LB.get(toy.id); toys.push({ id: toy.id, k: toy.k, x: q.x, y: q.y, s: q.s, z: q.z, cup: !!lb.cup && p >= 1 || (!!lb.cup && LA && LA.get(toy.id) && LA.get(toy.id).cup), over: !!lb.over, air: air.has(toy.id) || (LA && LA.get(toy.id) && LA.get(toy.id).x !== lb.x), squash: jelly(G.squash[toy.id]) }); };
-  B.cols.forEach(col => col.forEach(b => b.toys.forEach(addToy)));
+  const addToy = (toy) => { const q = pos(toy.id, easeIn); const lb = LB.get(toy.id); toys.push({ id: toy.id, k: toy.k, x: q.x, y: q.y, s: q.s, z: q.z, cup: !!lb.cup && p >= 1 || (!!lb.cup && LA && LA.get(toy.id) && LA.get(toy.id).cup), over: !!lb.over, air: air.has(toy.id) || (LA && LA.get(toy.id) && LA.get(toy.id).x !== lb.x), squash: jelly(G.squash[toy.id]), hidden: !!lb.hidden }); };
+  eachEl(B.cols, b => b.toys.forEach(addToy));
   if (B.air) B.air.toys.forEach(addToy);
   B.cup.forEach(addToy);
   let shake = 0; for (const f of G.fx) if (f.type === 'shake' && t < f.until) shake = Math.max(shake, f.amp * (1 - (t - f.t0) / (f.until - f.t0)));
-  return { bubbles, toys, cup: { n: B.cup.length, cap: B.cap }, shake };
+  const valves = G.s.valves.map((v, q) => Object.assign(valveXY(v), { q, open: B.valves ? B.valves[q] : v.open,
+    press: G.press && G.press.id === 'v' + q ? 1 : 0, swing: G.valveAnim[q] !== undefined ? Math.max(0, 1 - (t - G.valveAnim[q]) / 400) : 0 }));
+  return { bubbles, toys, valves, cup: { n: B.cup.length, cap: B.cap }, shake };
 }
 // 2D-запасной рендер (нет WebGL): те же данные, плоские фигуры.
 function draw2D(v, t){
   const sh = Math.sin(t * 0.06) * v.shake;
   drawCup(ctx, W / 2 + sh, GEO.cupY, cupSlots(v.cup.n, v.cup.cap), v.cup.cap, v.cup.n >= v.cup.cap, v.cup.n > v.cup.cap);
-  for (const q of v.bubbles) drawBubbleBack(ctx, q.x, q.y, q.r * (1 + 0.06 * q.jelly), q.hard);
-  for (const q of v.toys) drawToy(ctx, q.k, q.x, q.y, q.s * (1 + 0.15 * q.squash));
-  for (const q of v.bubbles) drawBubbleFront(ctx, q.x, q.y, q.r * (1 + 0.06 * q.jelly), q.hard);
+  const each = (fn) => { for (const q of v.bubbles){ if (q.sp) continue; ctx.save(); ctx.translate(q.x, q.y); ctx.scale(q.wide || 1, 1); fn(q); ctx.restore(); } };
+  for (const q of v.bubbles) if (q.sp) drawSponge2D(ctx, q.x, q.y, q.r * (1 + 0.06 * q.jelly));
+  each(q => drawBubbleBack(ctx, 0, 0, q.r * (1 + 0.06 * q.jelly), q.strong, q.murky));
+  for (const q of v.toys) if (!q.hidden) drawToy(ctx, q.k, q.x, q.y, q.s * (1 + 0.15 * q.squash));
+  each(q => drawBubbleFront(ctx, 0, 0, q.r * (1 + 0.06 * q.jelly), q.strong));
+  for (const q of v.valves) drawValve2D(ctx, q);
 }
 
 // ---------------------------------------------------------------------------
@@ -941,7 +1386,14 @@ const V3 = {
   TOY_FIT: 2.7,       // размер игрушки = TOY_FIT × половинный размер из раскладки
   DROPS: 240, SPARKS: 180, CONFETTI: 160, RINGS: 10,
 };
-const R3 = { ok: false, models: [], toyObj: new Map(), bubObj: new Map(), flyers: [], pops: [], cy: 0, foamKey: '', cupKey: '' };
+const R3 = { ok: false, models: [], toyObj: new Map(), bubObj: new Map(), spObj: new Map(), valveObj: [], flyers: [], pops: [], cy: 0, foamKey: '', cupKey: '' };
+// Смена уровня: убрать объекты прошлого (id пузырей и игрушек на каждом уровне начинаются заново).
+function clear3D(){
+  if (!R3.ok) return;
+  for (const mp of [R3.toyObj, R3.bubObj, R3.spObj]){ for (const o of mp.values()) R3.scene.remove(o); mp.clear(); }
+  for (const g of R3.valveObj) if (g) R3.scene.remove(g); R3.valveObj = [];
+  R3.cupKey = '';
+}
 function W3(x, y, z){
   const U = V3.U, k = (V3.D - z) / V3.D;
   return [(x - W / 2) * U * k, R3.cy + ((GEO.waterY - y) * U - R3.cy) * k, z];
@@ -1066,11 +1518,12 @@ function buildBubbleMats(){
   const T = R3.T;
   // Пузырь (по аудиту): середина почти прозрачна, чёткая белая кромка ~6% радиуса, белая дуга-блик сверху слева,
   // тёмный рефлекс снизу, радуга пятнами у края. ρ — доля радиуса от центра в проекции (не 1 − N·V: тот сжат у края).
-  // Двойной: второй контур внутри с зазором + лёгкая матовость только у края; значок «2» — в canvas-оверлее.
+  // Крепкий (uStrong): толстая янтарная кромка — «плотная» плёнка; значок-щит — в canvas-оверлее.
+  // Мутный (uMurky): молочная заливка с медленными разводами, игрушки за ней не рисуются; «?» — в canvas-оверлее.
   const vs = `varying vec3 vN; varying vec3 vV; varying vec3 vNv; varying vec3 vLp;
     void main(){ vec4 wp = modelMatrix * vec4(position, 1.0); vN = normalize(mat3(modelMatrix) * normal); vNv = normalize(normalMatrix * normal);
       vLp = position; vV = normalize(cameraPosition - wp.xyz); gl_Position = projectionMatrix * viewMatrix * wp; }`;
-  const fs = `uniform float uTime; uniform float uHard; uniform float uAlpha; varying vec3 vN; varying vec3 vV; varying vec3 vNv; varying vec3 vLp;
+  const fs = `uniform float uTime; uniform float uStrong; uniform float uMurky; uniform float uAlpha; varying vec3 vN; varying vec3 vV; varying vec3 vNv; varying vec3 vLp;
     void main(){
       vec3 n = normalize(vN), v = normalize(vV), nv = normalize(vNv);
       float ndv = max(dot(n, v), 0.0), rho = sqrt(max(0.0, 1.0 - ndv * ndv));
@@ -1086,17 +1539,61 @@ function buildBubbleMats(){
       float bot = smoothstep(0.7, 0.9, rho) * (1.0 - rim) * smoothstep(0.3, 0.9, -d2.y);
       col = mix(col, vec3(0.204, 0.408, 0.467), bot * 0.75); a = max(a, bot * 0.45);
       float sp = pow(max(dot(n, normalize(normalize(vec3(-0.45, 0.75, 0.5)) + v)), 0.0), 220.0) * 1.6;
-      if (uHard > 0.5){
-        float in2 = smoothstep(0.74, 0.77, rho) * (1.0 - smoothstep(0.80, 0.83, rho));
-        col = mix(col, vec3(1.0), in2); a = max(a, in2 * 0.9);
-        float frost = smoothstep(0.8, 0.9, rho) * (1.0 - rim);
-        col = mix(col, vec3(0.86, 0.95, 1.0), frost * 0.6); a = max(a, frost * 0.4);
+      if (uStrong > 0.5){
+        float band = smoothstep(0.78, 0.83, rho) * (1.0 - smoothstep(0.93, 0.97, rho));
+        col = mix(col, vec3(1.0, 0.74, 0.3), band * 0.8); a = max(a, band * 0.85);
+      }
+      if (uMurky > 0.5){
+        float fog = 1.0 - smoothstep(0.86, 0.95, rho);
+        float sw = 0.5 + 0.5 * sin(vLp.x * 4.0 + vLp.y * 3.0 + uTime * 0.7);
+        col = mix(col, vec3(0.80, 0.86, 0.96) + 0.06 * sw, fog * 0.92); a = max(a, fog * (0.82 + 0.08 * sw));
       }
       gl_FragColor = vec4(col + sp, clamp((a + sp) * uAlpha, 0.0, 1.0));
     }`;
-  const mk = (hard) => new T.ShaderMaterial({ vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false,
-    uniforms: { uTime: { value: 0 }, uHard: { value: hard ? 1 : 0 }, uAlpha: { value: 1 } } });
-  R3.bubGeo = new T.SphereGeometry(1, 48, 32); R3.matBub = mk(false); R3.matHard = mk(true); R3.mkBubMat = mk;
+  const mk = (kind) => new T.ShaderMaterial({ vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uStrong: { value: kind === 1 ? 1 : 0 }, uMurky: { value: kind === 2 ? 1 : 0 }, uAlpha: { value: 1 } } });
+  R3.bubGeo = new T.SphereGeometry(1, 48, 32); R3.matBub = mk(0); R3.matStrong = mk(1); R3.matMurky = mk(2); R3.mkBubMat = mk;
+  R3.bubMats = [R3.matBub, R3.matStrong, R3.matMurky];
+}
+// Краник (модель кодом, единицы — радиус фланца 0,62): хромированный фланец на стене, носик к соседнему столбику (+x,
+// зеркалится scale.x), сопло вниз, ручка-рычаг (зелёная вдоль носика — открыт, красная поперёк — закрыт), струйка и капля.
+function makeValve(){
+  const T = R3.T, g = new T.Group();
+  if (!R3.chrome){
+    R3.chrome = new T.MeshPhysicalMaterial({ color: 0xe6eef2, metalness: 1, roughness: 0.16, clearcoat: 1, envMapIntensity: 1.3 });
+    R3.valveOpen = new T.MeshPhysicalMaterial({ color: 0x3fcf62, roughness: 0.3, clearcoat: 1 });
+    R3.valveShut = new T.MeshPhysicalMaterial({ color: 0xf0505a, roughness: 0.3, clearcoat: 1 });
+    R3.waterMat = new T.MeshPhysicalMaterial({ color: 0x8fe0ff, roughness: 0.05, transparent: true, opacity: 0.75, clearcoat: 1 });
+  }
+  const fl = new T.Mesh(new T.CylinderGeometry(0.55, 0.62, 0.3, 28), R3.chrome); fl.rotation.x = Math.PI / 2; g.add(fl);
+  const sp = new T.Mesh(new T.CylinderGeometry(0.17, 0.21, 1.0, 16), R3.chrome); sp.rotation.z = Math.PI / 2; sp.position.set(0.6, 0, 0.3); g.add(sp);
+  const nz = new T.Mesh(new T.CylinderGeometry(0.15, 0.21, 0.45, 16), R3.chrome); nz.position.set(1.05, -0.17, 0.3); g.add(nz);
+  const hd = new T.Group(); hd.position.set(0, 0.32, 0.35); g.add(hd);
+  const stem = new T.Mesh(new T.CylinderGeometry(0.1, 0.12, 0.3, 12), R3.chrome); stem.position.y = 0.1; hd.add(stem);
+  const lever = new T.Mesh(new T.CapsuleGeometry(0.13, 0.7, 6, 12), R3.valveOpen); lever.rotation.z = Math.PI / 2; lever.position.set(0.28, 0.28, 0); hd.add(lever);
+  const water = new T.Mesh(new T.CylinderGeometry(0.07, 0.11, 0.7, 12), R3.waterMat); water.position.set(1.05, -0.72, 0.3); g.add(water);
+  const drop = new T.Mesh(new T.SphereGeometry(0.11, 12, 8), R3.waterMat); drop.position.set(1.05, -0.6, 0.3); g.add(drop);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g.userData = { hd, lever, water, drop };
+  return g;
+}
+// Губка (модель кодом, единицы — радиус пузыря): жёлтый брусок со скруглёнными краями и порами (текстура-канвас от сида).
+function makeSponge(){
+  const T = R3.T;
+  if (!R3.spongeGeo){
+    const sh = new T.Shape(), w = 0.72, h = 0.48, rr = 0.16;
+    sh.moveTo(-w + rr, -h); sh.lineTo(w - rr, -h); sh.quadraticCurveTo(w, -h, w, -h + rr); sh.lineTo(w, h - rr); sh.quadraticCurveTo(w, h, w - rr, h);
+    sh.lineTo(-w + rr, h); sh.quadraticCurveTo(-w, h, -w, h - rr); sh.lineTo(-w, -h + rr); sh.quadraticCurveTo(-w, -h, -w + rr, -h);
+    R3.spongeGeo = new T.ExtrudeGeometry(sh, { depth: 0.5, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.08, bevelSegments: 4, curveSegments: 8 });
+    R3.spongeGeo.translate(0, 0, -0.25);
+    const c = document.createElement('canvas'); c.width = c.height = 256; const gx = c.getContext('2d'), rnd = mulberry32(17);
+    gx.fillStyle = '#ffd34a'; gx.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 70; i++){ const x = rnd() * 256, y = rnd() * 256, r = 3 + rnd() * 9; gx.fillStyle = 'rgba(190,120,10,' + (0.35 + rnd() * 0.3) + ')'; gx.beginPath(); gx.ellipse(x, y, r, r * (0.6 + rnd() * 0.5), rnd() * 3, 0, Math.PI * 2); gx.fill(); }
+    const tex = new T.CanvasTexture(c); tex.colorSpace = T.SRGBColorSpace; tex.wrapS = tex.wrapT = T.RepeatWrapping; tex.repeat.set(1.2, 1.2);
+    R3.spongeMat = new T.MeshStandardMaterial({ map: tex, roughness: 0.95, color: 0xffffff });
+  }
+  const m = new T.Mesh(R3.spongeGeo, R3.spongeMat); m.castShadow = true; m.receiveShadow = true;
+  const g = new T.Group(); g.add(m); return g;
 }
 // Частицы: брызги, искры, конфетти — пулы InstancedMesh; движение аналитическое от времени старта (абсолютное время).
 function buildParticles(){
@@ -1148,7 +1645,7 @@ function spawnConfetti(n){
 // Тройка улетает: копия пузыря с тремя игрушками всплывает, крутится и лопается искрами наверху.
 function spawnFlyer(x, y, r, k){
   if (!R3.ok) return;
-  const T = R3.T, grp = new T.Group(), mat = R3.mkBubMat(false), bub = new T.Mesh(R3.bubGeo, mat);
+  const T = R3.T, grp = new T.Group(), mat = R3.mkBubMat(0), bub = new T.Mesh(R3.bubGeo, mat);
   bub.renderOrder = 10; grp.add(bub);
   const toys = [];
   for (const o of SLOT_OFS[3]){ const m = R3.models[k].clone(); m.position.set(o[0], -o[1], 0); m.scale.setScalar(TOY_BY_N[3] * V3.TOY_FIT); grp.add(m); toys.push(m); }
@@ -1205,7 +1702,8 @@ async function loadToys(){
 function warm3D(){
   const T = R3.T, tmp = [];
   R3.models.forEach((m, k) => { const c = m.clone(); c.position.set(k * 0.3 - 1, 2, 0); c.scale.setScalar(0.3); R3.scene.add(c); tmp.push(c); });
-  const fb = new T.Mesh(R3.bubGeo, R3.matHard); fb.position.set(1, 2, 0); fb.scale.setScalar(0.2); R3.scene.add(fb); tmp.push(fb);
+  [R3.matStrong, R3.matMurky].forEach((mt, k) => { const fb = new T.Mesh(R3.bubGeo, mt); fb.position.set(1 + k * 0.4, 2, 0); fb.scale.setScalar(0.2); R3.scene.add(fb); tmp.push(fb); });
+  const vw = makeValve(), sg = makeSponge(); vw.position.set(-1.5, 2, 0); sg.position.set(1.8, 2, 0); vw.scale.setScalar(0.2); sg.scale.setScalar(0.2); R3.scene.add(vw, sg); tmp.push(vw, sg);
   for (const r of R3.rings){ r.mesh.visible = true; r.mesh.scale.setScalar(0.001); }
   try { R3.renderer.compile(R3.scene, R3.camera); R3.renderer.render(R3.scene, R3.camera); } catch (e) {}
   for (const o of tmp) R3.scene.remove(o);
@@ -1243,20 +1741,42 @@ function draw3D(v, t){
     R3.cup.position.x = Math.sin(t * 0.09) * (v.shake > 6 ? v.shake : 0) * U;
   }
   // пузыри
-  R3.matBub.uniforms.uTime.value = R3.matHard.uniforms.uTime.value = t / 1000;
-  const seenB = new Set();
+  for (const mt of R3.bubMats) mt.uniforms.uTime.value = t / 1000;
+  const seenB = new Set(), seenS = new Set();
   if (v) for (const b of v.bubbles){
+    const bob = Math.sin(t * 0.0016 + b.id * 1.7) * (b.wide ? 0.6 : 1.4), s = b.r * U;
+    if (b.sp){                                                 // губка — модель кодом, не пузырь
+      let g = R3.spObj.get(b.id);
+      if (!g){ g = makeSponge(); R3.scene.add(g); R3.spObj.set(b.id, g); }
+      const [x, y] = W3(b.x, b.y + bob * 0.5, 0);
+      g.position.set(x, y, 0); g.scale.set(s * (1 + 0.1 * b.jelly), s * (1 - 0.16 * b.jelly), s);
+      seenS.add(b.id); continue;
+    }
     let m = R3.bubObj.get(b.id);
     if (!m){ m = new T.Mesh(R3.bubGeo, R3.matBub); m.renderOrder = 10; R3.scene.add(m); R3.bubObj.set(b.id, m); }
-    m.material = b.hard ? R3.matHard : R3.matBub;
-    const bob = Math.sin(t * 0.0016 + b.id * 1.7) * 1.4, [x, y] = W3(b.x, b.y + bob, 0), s = b.r * U;
-    m.position.set(x, y, 0); m.scale.set(s * (1 + 0.07 * b.jelly), s * (1 - 0.07 * b.jelly), s * (1 + 0.07 * b.jelly));
+    m.material = b.murky ? R3.matMurky : b.strong ? R3.matStrong : R3.matBub;
+    const [x, y] = W3(b.x, b.y + bob, 0), kx = b.wide || 1;
+    m.position.set(x, y, 0); m.scale.set(s * kx * (1 + 0.07 * b.jelly), s * (1 - 0.07 * b.jelly), s * (1 + 0.07 * b.jelly));
     seenB.add(b.id);
   }
   for (const [id, m] of R3.bubObj) if (!seenB.has(id)){ R3.scene.remove(m); R3.bubObj.delete(id); }
+  for (const [id, g] of R3.spObj) if (!seenS.has(id)){ R3.scene.remove(g); R3.spObj.delete(id); }
+  // краники: на стене в ромбе между пузырями; ручка вдоль носика и струйка — открыт, ручка поперёк и красная — закрыт
+  if (v) v.valves.forEach((q) => {
+    let g = R3.valveObj[q.q];
+    if (!g){ g = makeValve(); R3.scene.add(g); R3.valveObj[q.q] = g; }
+    const s = GEO.r * VALVE_R * U / 0.62 * (1 - 0.1 * q.press), [x, y, z] = W3(q.x, q.y, 1.2);
+    g.position.set(x, y, z); g.scale.set(s * q.dir, s, s);
+    const u = g.userData, sw = Math.sin(q.swing * Math.PI * 3) * q.swing * 0.5;
+    u.hd.rotation.z = (q.open ? 0 : Math.PI / 2) + sw;              // открыт — рычаг вдоль носика, закрыт — торчит вверх
+    u.lever.material = q.open ? R3.valveOpen : R3.valveShut;
+    u.water.visible = q.open; u.water.scale.set(1, 0.85 + 0.15 * Math.sin(t * 0.03 + q.q), 1);
+    u.drop.visible = q.open; u.drop.position.y = -0.55 - ((t * 0.0022 + q.q * 0.37) % 1) * 1.1;
+  });
   // игрушки
   const seenT = new Set();
   if (v) for (const q of v.toys){
+    if (q.hidden) continue;                                     // в мутном пузыре игрушки не видны
     let o = R3.toyObj.get(q.id);
     if (o && o.userData.k !== q.k){ R3.scene.remove(o); o = null; }          // id игрушек начинаются заново на каждом уровне — сверять вид
     if (!o){ o = R3.models[q.k].clone(); o.userData.k = q.k; R3.scene.add(o); R3.toyObj.set(q.id, o); }
@@ -1314,12 +1834,12 @@ function drawBathroom(c){
     for (const [dx, dr] of [[-0.8, 0.32], [-0.35, 0.42], [0.25, 0.4], [0.75, 0.3]]){ c.beginPath(); c.arc(x + dx * r, wy + 6, dr * r, 0, Math.PI * 2); c.fill(); }
   }
 }
-// Пузырь: прозрачная заливка (рисуется до игрушек). Двойной — плотнее.
-function drawBubbleBack(c, x, y, r, hard){
-  c.fillStyle = hard ? PAL['bubble-hard'] : PAL.bubble;
+// Пузырь: прозрачная заливка (рисуется до игрушек). Крепкий — плотнее, мутный — молочный.
+function drawBubbleBack(c, x, y, r, hard, murky){
+  c.fillStyle = murky ? 'rgba(214,226,242,.9)' : hard ? PAL['bubble-hard'] : PAL.bubble;
   c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
 }
-// Пузырь: ободок и блик (поверх игрушек). Двойной — второй ободок с насечками (не только цвет, §9).
+// Пузырь: ободок и блик (поверх игрушек). Крепкий (hard) — второй ободок с насечками (не только цвет, §9).
 function drawBubbleFront(c, x, y, r, hard){
   c.lineWidth = r * 0.07; c.strokeStyle = hard ? PAL['rim-hard'] : PAL.rim;
   c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.stroke();
@@ -1398,13 +1918,62 @@ function drawStar(c, s, col){            // звезда: пять лучей и
   eye(c, -0.18 * s, 0, 0.08 * s); eye(c, 0.18 * s, 0, 0.08 * s);
   c.beginPath(); c.arc(0, 0.12 * s, 0.17 * s, 0.15 * Math.PI, 0.85 * Math.PI); c.stroke();
 }
-// Значок двойного пузыря: два наложенных кружка и «2» — читается формой, не цветом (§9).
-function drawHardBadge(c, x, y, r){
-  const s = Math.max(9, r * 0.24);
-  c.save(); c.lineWidth = 2; c.strokeStyle = '#ffffff'; c.fillStyle = '#2f7ef0';
+// Значки механик поверх 3D (canvas-оверлей): замок — замочек в углу, крепкий — щит в углу, мутный — «?» на месте
+// каждой игрушки (число видно, вид — нет). Читаются формой, не только цветом (§9).
+function drawBadges(c, v, t){
+  for (const q of v.valves) drawValveBadge(c, q);
+  for (const b of v.bubbles){
+    const bx = b.x + b.r * 0.66, by = b.y - b.r * 0.66;
+    if (b.lock) drawLockBadge(c, bx, by, b.r, false);
+    if (b.strong) drawStrongBadge(c, bx, by, b.r);
+    if (b.murky && b.n){
+      const ofs = SLOT_OFS[Math.min(3, b.n)], rs = b.r * TOY_BY_N[Math.min(3, b.n)] * 1.05;
+      for (let k = 0; k < b.n; k++) drawQuestion(c, b.x + ofs[k][0] * b.r, b.y + ofs[k][1] * b.r, rs);
+    }
+  }
+}
+function badgeDisc(c, x, y, s, fill){ c.lineWidth = 2; c.strokeStyle = '#ffffff'; c.fillStyle = fill; c.beginPath(); c.arc(x, y, s, 0, Math.PI * 2); c.fill(); c.stroke(); }
+// Замочек: дужка и корпус с скважиной; open — дужка поднята и сдвинута (для эффекта «открылся»).
+function drawLockBadge(c, x, y, r, open){
+  const s = Math.max(10, r * 0.26);
+  c.save(); badgeDisc(c, x, y, s, '#7a5af0');
+  c.strokeStyle = '#fff'; c.lineWidth = s * 0.2; c.lineCap = 'round';
+  c.beginPath(); c.arc(x + (open ? s * 0.28 : 0), y - s * (open ? 0.3 : 0.12), s * 0.3, Math.PI, Math.PI * 2); c.stroke();
+  c.fillStyle = '#fff'; c.beginPath(); c.roundRect(x - s * 0.45, y - s * 0.12, s * 0.9, s * 0.62, s * 0.12); c.fill();
+  c.fillStyle = '#7a5af0'; c.beginPath(); c.arc(x, y + s * 0.15, s * 0.11, 0, Math.PI * 2); c.fill();
+  c.restore();
+}
+// Щит крепкого пузыря.
+function drawStrongBadge(c, x, y, r){
+  const s = Math.max(10, r * 0.26);
+  c.save(); badgeDisc(c, x, y, s, '#f08a1c');
+  c.fillStyle = '#fff'; c.beginPath(); c.moveTo(x, y - s * 0.6); c.lineTo(x + s * 0.48, y - s * 0.38); c.lineTo(x + s * 0.4, y + s * 0.18);
+  c.quadraticCurveTo(x + s * 0.2, y + s * 0.5, x, y + s * 0.62); c.quadraticCurveTo(x - s * 0.2, y + s * 0.5, x - s * 0.4, y + s * 0.18); c.lineTo(x - s * 0.48, y - s * 0.38); c.closePath(); c.fill();
+  c.fillStyle = '#f08a1c'; c.fillRect(x - s * 0.06, y - s * 0.38, s * 0.12, s * 0.7); c.restore();
+}
+// Состояние краника на фланце: открыт — зелёный кружок со стрелкой в сторону потока, закрыт — красный «кирпич».
+function drawValveBadge(c, v){
+  const s = Math.max(7, GEO.r * VALVE_R * 0.42), x = v.x, y = v.y;
+  c.save(); c.lineWidth = 1.5; c.strokeStyle = '#fff'; c.fillStyle = v.open ? '#2fb84f' : '#e8404b';
   c.beginPath(); c.arc(x, y, s, 0, Math.PI * 2); c.fill(); c.stroke();
-  c.fillStyle = '#fff'; c.font = '900 ' + Math.round(s * 1.25) + 'px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.fillText('2', x, y + 1); c.restore();
+  c.fillStyle = '#fff';
+  if (v.open){ const d = v.dir; c.beginPath(); c.moveTo(x - d * s * 0.55, y - s * 0.18); c.lineTo(x + d * s * 0.05, y - s * 0.18); c.lineTo(x + d * s * 0.05, y - s * 0.48);
+    c.lineTo(x + d * s * 0.62, y); c.lineTo(x + d * s * 0.05, y + s * 0.48); c.lineTo(x + d * s * 0.05, y + s * 0.18); c.lineTo(x - d * s * 0.55, y + s * 0.18); c.closePath(); c.fill(); }
+  else c.fillRect(x - s * 0.58, y - s * 0.17, s * 1.16, s * 0.34);
+  c.restore();
+}
+// «?» на месте спрятанной игрушки мутного пузыря.
+function drawQuestion(c, x, y, s){
+  c.save(); c.fillStyle = 'rgba(70,90,130,.55)'; c.beginPath(); c.arc(x, y, s, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#fff'; c.font = '900 ' + Math.round(s * 1.35) + 'px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText('?', x, y + s * 0.06); c.restore();
+}
+// 2D-запасные губка и краник (без WebGL).
+function drawSponge2D(c, x, y, r){ c.fillStyle = '#ffd54a'; c.strokeStyle = '#c9971a'; c.lineWidth = 3; c.beginPath(); c.roundRect(x - r * 0.75, y - r * 0.5, r * 1.5, r, r * 0.18); c.fill(); c.stroke(); }
+function drawValve2D(c, v){
+  const r = GEO.r * VALVE_R; c.save(); c.fillStyle = '#dfe8ee'; c.strokeStyle = '#6b8796'; c.lineWidth = 3;
+  c.beginPath(); c.arc(v.x, v.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
+  c.fillStyle = v.open ? '#3fbf55' : '#e8505b'; c.beginPath(); c.arc(v.x, v.y, r * 0.45, 0, Math.PI * 2); c.fill(); c.restore();
 }
 // Палец-подсказка: кольцо пульсирует над пузырём, кончик указывает на него.
 function drawFinger(c, x, y, t){
@@ -1438,6 +2007,8 @@ function drawFx(c, f, t){
     c.globalAlpha = 1;
   } else if (f.type === 'clear'){
     c.globalAlpha = 1 - p; drawToy(c, f.k, f.x, f.y - 40 * p, f.s * (1 + 0.6 * p)); c.globalAlpha = 1;
+  } else if (f.type === 'unlock'){
+    c.save(); c.globalAlpha = 1 - p; drawLockBadge(c, f.x, f.y - 26 * easeOut(p), f.r * (1 + 0.3 * p), true); c.restore();
   } else if (f.type === 'text'){
     const pop = p < 0.18 ? 0.6 + 0.6 * (p / 0.18) : p < 0.3 ? 1.2 - 0.2 * ((p - 0.18) / 0.12) : 1;
     c.save(); c.globalAlpha = p < 0.75 ? 1 : 1 - (p - 0.75) / 0.25; c.translate(f.x, f.y - 34 * easeOut(p)); c.scale(pop, pop);
@@ -1464,17 +2035,28 @@ window.PENA_V_VANNE = {
   G, CFG, LEVELS,
   state(){
     if (!G.s) return { screen: G.screen };
-    const cols = G.s.cols.map(col => col.map(b => (b.hard ? '#' : '') + b.toys.map(t => 'ABCDEF'[t.k]).join('')).join(' ')).join(' | ');
-    return { level: G.s.li + 1, cols, cup: G.s.cup.map(t => 'ABCDEF'[t.k]).join(''), cap: G.s.cap, moves: G.s.moves, par: G.s.par,
+    const el = (b) => (b.lock ? '#' : '') + (b.murky ? '?' : '') + (b.strong ? '!' : '') + (b.sp ? '*' : '') + (b.wc !== undefined ? '=' : '') + b.toys.map(t => 'ABCDEF'[t.k]).join('');
+    const cols = G.s.cols.map(col => col.map(el).join(' ')).join(' | ');
+    return { level: G.s.li + 1, cols, valves: G.s.valves.map(v => `${v.c}→${v.to}@${v.k}:${v.open ? 'open' : 'shut'}`).join(' '),
+             cup: G.s.cup.map(t => 'ABCDEF'[t.k]).join(''), cap: G.s.cap, moves: G.s.moves, par: G.s.par, undos: G.save.undos, reviveUsed: G.reviveUsed,
              win: isWin(G.s), lose: isLose(G.s), why: G.s.why, animating: !!G.anim, screen: G.screen };
   },
-  play(n){ startLevel(Math.max(0, Math.min(LEVELS.length, n || 1) - 1)); return this.state(); },
-  custom(rows, cap){                            // своя раскладка для проверки: custom([['B'], ['A'], ['AB']], 3) — столбики снизу вверх
-    startLevel(0); G.s = layoutToState(0, parseLayout(rows), cap || CFG.CUP_CAP, 0); G.maxH = Math.max(...G.s.cols.map(c => c.length));
+  play(n, extraSlot){ startLevel(Math.max(0, Math.min(LEVELS.length, n || 1) - 1), extraSlot); return this.state(); },
+  // Своя раскладка: столбики снизу вверх, префиксы '#' замок, '?' мутный, '!' крепкий, '*' губка, '=' широкий ('=AB' и '=' в соседних
+  // столбиках ряда 0); valves — [[столбик, высота, куда, открыт]]. Пример: custom([['=AB', '#C', 'A'], ['=', '*', 'AB']], 3, [[0, 2, 1, true]])
+  custom(rows, cap, valves){
+    startLevel(0); G.s = layoutToState(0, parseLayout(rows, valves), cap || CFG.CUP_CAP, 0); clear3D(); G.maxH = fieldH();
     G.hintMove = -1; $('tip').textContent = ''; fit(); hud(); R3.foamKey = R3.cupKey = ''; return this.state(); },
   tap(c, i){ tapBubble(c, i); return this.state(); },
-  undo(){ undo(); return this.state(); },
-  goto(screen){ goto(screen); return G.screen; },
+  tapValve(q){ tapValve(q || 0); return this.state(); },
+  valveXY(q){ const v = valveXY(G.s.valves[q || 0]), r = $('cv').getBoundingClientRect(); return { x: r.left + v.x * scale, y: r.top + v.y * scale }; },   // экранные координаты краника (для касаний)
+  bubbleXY(c, i){ const b = G.s.cols[c][i], q = b.wc !== undefined ? bubbleXY(b.wc + 0.5, 0) : bubbleXY(c, i), r = $('cv').getBoundingClientRect(); return { x: r.left + q.x * scale, y: r.top + q.y * scale }; },
+  undo(){ useUndo(); return this.state(); },   // бустер (тратит запас; при нуле — предложение)
+  rawUndo(){ undo(); return this.state(); },   // отмена без бустера (отладка)
+  revive(){ doRevive(); return this.state(); },
+  monet(){ return Object.assign({}, G.monet); },
+  undos(n){ if (n !== undefined){ G.save.undos = n; save(); hud(); } return G.save.undos; },
+  goto(screen, payload){ goto(screen, payload); return G.screen; },
   solve(){ return G.s ? (solve(G.s) || []).map(m => [m >> 4, m & 15]) : null; },
   auto(delayMs){ const path = this.solve() || []; path.forEach(([c, i], k) => setTimeout(() => tapBubble(c, i), (delayMs || 700) * (k + 1))); return path; },
   drive(sec){                                   // ручной прогон игрового времени: часы сдвигаются шагами по 16 мс
@@ -1490,7 +2072,7 @@ window.PENA_V_VANNE = {
 // --- старт ---
 fit(); init3D(); fit(); hud();
 const startHash = location.hash.slice(1) === 'unlock' ? (setUnlockAll(true), 'menu') : location.hash.slice(1);
-if (startHash === 'game') startLevel(G.save.level); else goto(startHash || 'menu');
+if (startHash === 'game') startLevel(G.save.level); else if (startHash === 'start') goto('start', G.save.level); else goto(startHash || 'menu');
 requestAnimationFrame(frame);
 log('event', 'boot', 'levels=' + LEVELS.length);
 </script>
